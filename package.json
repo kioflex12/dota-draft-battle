@@ -1,0 +1,14 @@
+{
+  "name": "dota-draft-battle",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Битва драфтов Dota 2 Captains Mode — мультиплеер, боты, анализ",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "build-data": "node tools/build-data.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": { "ws": "^8.18.0" }
+}

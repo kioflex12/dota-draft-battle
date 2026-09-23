@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Битва драфтов · Dota 2</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_universal.png">
+</head>
+<body>
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    <div>Загрузка героев и статистики…</div>
+  </div>
+
+  <section id="screen-menu" class="screen hidden">
+    <div class="menu-bg"></div>
+    <div class="menu">
+      <div class="logo">
+        <div class="logo-top">DOTA 2 · CAPTAINS MODE</div>
+        <h1>Битва драфтов</h1>
+        <div class="logo-sub">Патч <b id="patch-label">7.41f</b> · <span id="data-label"></span></div>
+      </div>
+      <label class="field">
+        <span>Имя капитана</span>
+        <input id="name-input" maxlength="20" placeholder="Капитан">
+      </label>
+      <div class="menu-grid">
+        <div class="card">
+          <h3>Против друга</h3>
+          <p>Создайте комнату и отправьте ссылку. Каждый — капитан своей команды. Остальное настраивается в лобби.</p>
+          <div class="opts">
+            <label>Первый пик
+              <select id="pvp-order"><option value="coin">Жребий (как в Dota)</option><option value="random">Случайно</option><option value="radiant">Силы Света</option><option value="dire">Силы Тьмы</option></select>
+            </label>
+            <label class="check"><input type="checkbox" id="pvp-timers" checked> Таймеры как в Dota</label>
+          </div>
+          <button class="btn primary" id="btn-create">Создать комнату</button>
+          <div class="join-row">
+            <input id="join-code" maxlength="5" placeholder="КОД">
+            <button class="btn" id="btn-join">Войти</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Против бота</h3>
+          <p>Бот драфтит по статистике патча: контрпики, связки, позиции и мета.</p>
+          <div class="opts">
+            <label>Сложность
+              <select id="bot-diff"><option value="easy">Лёгкий</option><option value="normal" selected>Средний</option><option value="hard">Сложный</option></select>
+            </label>
+            <label>Сторона
+              <select id="bot-side"><option value="radiant">Силы Света</option><option value="dire">Силы Тьмы</option></select>
+            </label>
+            <label>Первый пик
+              <select id="bot-order"><option value="random">Случайно</option><option value="coin">Жребий</option><option value="me">У меня</option><option value="bot">У бота</option></select>
+            </label>
+            <label class="check"><input type="checkbox" id="bot-timers" checked> Таймеры</label>
+          </div>
+          <button class="btn primary" id="btn-bot">Играть</button>
+        </div>
+        <div class="card">
+          <h3>На одном экране</h3>
+          <p>Двое за одним компьютером: ходы по очереди, без таймеров или с ними.</p>
+          <div class="opts">
+            <label>Первый пик
+              <select id="local-order"><option value="random">Случайно</option><option value="coin">Жребий</option><option value="radiant">Силы Света</option><option value="dire">Силы Тьмы</option></select>
+            </label>
+            <label class="check"><input type="checkbox" id="local-timers"> Таймеры</label>
+          </div>
+          <button class="btn" id="btn-local">Начать</button>
+        </div>
+      </div>
+      <div class="menu-foot">
+        Порядок пиков/банов Captains Mode (7.34+): 7 банов → 2 пика → 3 бана → 6 пиков → 4 бана → 2 пика.
+        Статистика: OpenDota (публичные матчи Divine+ на текущем патче и про-сцена), данные героев — Valve.<br><span id="net-label"></span>
+      </div>
+    </div>
+  </section>
+
+  <section id="screen-lobby" class="screen hidden">
+    <div class="lobby">
+      <div class="lobby-head">
+        <div>
+          <div class="muted small">КОД КОМНАТЫ</div>
+          <div class="room-code" id="lobby-code">-----</div>
+        </div>
+        <div class="lobby-link">
+          <input id="lobby-link" readonly>
+          <button class="btn" id="btn-copy">Скопировать ссылку</button>
+        </div>
+      </div>
+      <div class="seats">
+        <div class="seat radiant" id="seat-radiant"></div>
+        <div class="vs">VS</div>
+        <div class="seat dire" id="seat-dire"></div>
+      </div>
+      <div class="lobby-settings">
+        <div class="sec-title">Настройки лобби</div>
+        <div class="settings-grid">
+          <label>Первый пик
+            <select data-set="order">
+              <option value="coin">Жребий: победитель выбирает пик или сторону</option>
+              <option value="random">Случайно</option>
+              <option value="radiant">Всегда у Сил Света</option>
+              <option value="dire">Всегда у Сил Тьмы</option>
+            </select>
+          </label>
+          <label>Бан в I фазе
+            <select data-set="firstBanTime"><option>10</option><option>15</option><option>20</option><option>30</option></select>
+          </label>
+          <label>Время на ход
+            <select data-set="turnTime"><option>15</option><option>20</option><option>30</option><option>45</option><option>60</option></select>
+          </label>
+          <label>Резервное время
+            <select data-set="reserve"><option value="0">Нет</option><option value="60">1:00</option><option value="130">2:10 (Dota)</option><option value="200">3:20</option><option value="300">5:00</option></select>
+          </label>
+          <label class="check"><input type="checkbox" data-set="timers"> Таймеры включены</label>
+          <label class="check"><input type="checkbox" data-set="hints"> Разрешить подсказки</label>
+        </div>
+        <div class="muted small" id="settings-note"></div>
+        <div><button class="btn" id="btn-swap">Сменить сторону</button> <button class="btn" id="btn-dota-preset">Как в Dota</button></div>
+      </div>
+      <div class="lobby-actions">
+        <button class="btn" id="btn-lobby-leave">Выйти</button>
+        <button class="btn primary" id="btn-start">Начать драфт</button>
+      </div>
+      <div class="muted small" id="lobby-spect"></div>
+      <div class="chat lobby-chat" data-chat></div>
+    </div>
+  </section>
+
+  <section id="screen-draft" class="screen hidden">
+    <header class="draft-top">
+      <div class="team-side radiant">
+        <div class="team-meta">
+          <div class="team-name"><span class="team-dot"></span><span data-team-name="radiant">Силы Света</span></div>
+          <div class="captain" data-captain="radiant"></div>
+          <div class="reserve" data-reserve="radiant">130</div>
+        </div>
+        <div class="picks" data-picks="radiant"></div>
+      </div>
+      <div class="center-clock">
+        <div class="phase-name" id="phase-name">Баны · I</div>
+        <div class="big-timer" id="big-timer">15</div>
+        <div class="turn-label" id="turn-label"></div>
+      </div>
+      <div class="team-side dire">
+        <div class="picks" data-picks="dire"></div>
+        <div class="team-meta">
+          <div class="team-name"><span data-team-name="dire">Силы Тьмы</span><span class="team-dot"></span></div>
+          <div class="captain" data-captain="dire"></div>
+          <div class="reserve" data-reserve="dire">130</div>
+        </div>
+      </div>
+    </header>
+    <div class="bans-row">
+      <div class="bans" data-bans="radiant"></div>
+      <div class="win-meter" id="live-meter" title="Оценка драфта по ходу пиков"></div>
+      <div class="bans" data-bans="dire"></div>
+    </div>
+    <div class="sequence" id="sequence"></div>
+
+    <div class="draft-body">
+      <div class="grid-wrap">
+        <div class="grid-tools">
+          <input id="hero-search" placeholder="Поиск героя…" autocomplete="off">
+          <div class="role-filters" id="role-filters"></div>
+          <label class="check small"><input type="checkbox" id="hints-toggle"> Подсказки</label>
+        </div>
+        <div class="hero-grid" id="hero-grid"></div>
+      </div>
+      <aside class="side-panel">
+        <div class="hints hidden" id="hints"></div>
+        <div class="hero-panel" id="hero-panel">
+          <div class="empty-panel">Выберите героя в сетке, чтобы увидеть способности и статистику</div>
+        </div>
+        <div class="chat draft-chat" data-chat></div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="screen-coin" class="screen hidden">
+    <div class="coin-wrap">
+      <div class="coin" id="coin-anim"><div class="face r"></div><div class="face d"></div></div>
+      <h2 id="coin-title">Жребий</h2>
+      <div class="muted" id="coin-sub"></div>
+      <div class="coin-opts" id="coin-opts"></div>
+      <div class="chat lobby-chat" data-chat></div>
+    </div>
+  </section>
+
+  <section id="screen-result" class="screen hidden">
+    <div class="result" id="result"></div>
+  </section>
+
+  <div id="tooltip" class="tooltip hidden"></div>
+  <div id="toast" class="toast hidden"></div>
+  <div id="modal" class="modal hidden"><div class="modal-body" id="modal-body"></div></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
