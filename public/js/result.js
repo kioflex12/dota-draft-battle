@@ -65,19 +65,23 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
       </div>`;
   };
 
+  // Строки отсортированы по величине: сверху то, что решило исход, а не то, что раньше в списке.
   const contribution = () => {
     const rows = [
       ['lanes', 'Линии'], ['counters', 'Контрпики'], ['synergy', 'Синергия'],
       ['heroes', 'Сила героев в патче'], ['positions', 'Позиции'], ['composition', 'Состав команды'],
-    ];
-    const vals = rows.map(([k]) => toPct(A.components[k]));
-    const max = Math.max(4, ...vals.map(Math.abs));
-    return `<div class="contrib">${rows.map(([k, l], i) => {
-      const v = vals[i];
+    ].map(([k, l]) => ({ k, l, v: toPct(A.components[k]) })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+    const max = Math.max(4, ...rows.map(r => Math.abs(r.v)));
+    const big = rows.filter(r => Math.abs(r.v) >= 1);
+    const lead = big.length
+      ? `Исход решают прежде всего: ${big.slice(0, 2).map(r => `${r.l.toLowerCase()} (${r.v > 0 ? 'в пользу Сил Света' : 'в пользу Сил Тьмы'})`).join(' и ')}.`
+      : 'Ни одна часть драфта не даёт заметного перевеса — составы равные.';
+    return `<div class="contrib-lead">${lead}</div>
+    <div class="contrib">${rows.map(({ l, v }) => {
       const w = Math.abs(v) / max * 50;
       return `<div class="contrib-row"><span class="lbl">${l}</span><div class="ct"><i style="${v >= 0 ? 'left:50%' : `left:${50 - w}%`};width:${w}%;background:${v >= 0 ? 'var(--radiant)' : 'var(--dire)'}"></i></div><span class="num ${signCls(v)}">${fmtPct(v)}%</span></div>`;
     }).join('')}</div>
-    <div class="muted small" style="margin-top:8px">Плюс — в пользу Сил Света, минус — в пользу Сил Тьмы. Проценты — вклад в шанс победы.</div>`;
+    <div class="muted small" style="margin-top:8px">Полоска вправо — в пользу Сил Света, влево — в пользу Сил Тьмы. Число — на сколько процентов эта часть драфта сдвигает шанс победы.</div>`;
   };
 
   const insights = () => `<div class="insights">${A.insights.map(i => `

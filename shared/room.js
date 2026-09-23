@@ -173,6 +173,7 @@ export class RoomManager {
   tick() {
     const now = Date.now();
     for (const room of this.rooms.values()) {
+      if (room.phase === 'draft') this.coverAbandonedTurn(room, now);
       if (room.phase === 'draft' && room.draft.timers) {
         const c = clock(room.draft, now);
         if (c && c.expired) {
@@ -194,6 +195,23 @@ export class RoomManager {
         this.onEmpty?.(room);
       }
     }
+  }
+
+  // Без таймеров ушедший игрок вешал драфт насовсем: ход его, а сделать его некому. Спустя
+  // полторы минуты за отключившегося ходит движок — партию можно доиграть, а вернувшийся игрок
+  // получает своё место обратно по токену.
+  coverAbandonedTurn(room, now) {
+    const t = currentTurn(room.draft);
+    if (!t) return;
+    const seat = room.seats[t.team];
+    if (!seat || seat.bot || seat.client) { room.abandonedSince = null; return; }
+    if (room.abandonedStep !== t.index) { room.abandonedStep = t.index; room.abandonedSince = now; return; }
+    if (now - room.abandonedSince < 90_000) return;
+    room.abandonedSince = now;
+    const hero = this.engine.botChoice(room.draft, t.team, t.type, 'normal');
+    applyAction(room.draft, t.team, hero, { auto: true, now });
+    this.sys(room, `${seat.name} не на связи — ход сделан автоматически.`);
+    this.afterAction(room);
   }
 
   joinRoom(client, room, wantTeam) {
