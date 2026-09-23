@@ -523,6 +523,16 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .seg button.on { background: #262e3a; color: var(--text); }
 
 .chart svg { width: 100%; height: auto; display: block; }
+.plan { background: #10151c; border: 1px solid var(--line); border-left-width: 3px; border-radius: 5px; padding: 10px 12px; }
+.plan.radiant { border-left-color: var(--radiant); }
+.plan.dire { border-left-color: var(--dire); }
+.plan .who { font-family: var(--head); letter-spacing: .1em; text-transform: uppercase; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.plan.radiant .who { color: var(--radiant-2); }
+.plan.dire .who { color: var(--dire-2); }
+.plan .p-style { margin-bottom: 4px; }
+.plan .p-window { color: var(--gold); font-size: 14px; }
+.plan .p-notes { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+.plan .p-notes li { margin-bottom: 3px; }
 .phase-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .phase-card { background: #10151c; border: 1px solid var(--line); border-radius: 5px; padding: 12px; text-align: center; }
 .phase-card .pn { font-family: var(--head); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-size: 12px; }

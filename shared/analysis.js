@@ -22,10 +22,24 @@ const K_LANE = 20;
 const K_LANE_PAIR = 12;
 const LANE_TO_LOGIT = 0.00006;
 const PHASE_WEIGHT = 0.45;
+// Перевес на линии — это золото и опыт к 10-й минуте: к сороковой он либо уже превращён в
+// объекты, либо отыгран фармом. Поэтому в кривой по минутам он затухает, а не стоит плоско.
+const LANE_DECAY_MIN = 0.35;
+const LANE_DECAY_SPAN = 1.45;
+const LANE_DECAY_TAU = 18;
 // Drafts rarely decide more than ~75/25 in real Dota; the raw sum of signals is overconfident.
 const CAL = 0.7;
+// Насколько сильно риск ответного пика опускает кандидата. Подобрано так, чтобы он разводил
+// близких по силе героев, но не перевешивал реальную выгоду от пика.
+const RISK_WEIGHT = 0.8;
 const PHASE_CENTERS = [16, 22.5, 27.5, 32.5, 37.5, 42.5, 47.5, 55, 65];
 export const CURVE_MINUTES = [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
+
+// Вес перевеса линий на минуте m. Нормирован так, чтобы в среднем по кривой он равнялся единице:
+// иначе кривая в целом уезжала бы относительно общей оценки драфта.
+const laneRaw = m => LANE_DECAY_MIN + LANE_DECAY_SPAN * Math.exp(-(m - CURVE_MINUTES[0]) / LANE_DECAY_TAU);
+const LANE_NORM = CURVE_MINUTES.reduce((s, m) => s + laneRaw(m), 0) / CURVE_MINUTES.length;
+export const laneWeightAt = m => laneRaw(m) / LANE_NORM;
 
 function permutations(n) {
   const res = [];
@@ -364,9 +378,14 @@ export function createEngine(heroList, stats) {
     const components = Object.fromEntries(Object.entries({ heroes: heroBase, synergy: synR - synD, counters, lanes: laneLogit, positions, composition: compR.adj - compD.adj }).map(([k, v]) => [k, v * CAL]));
     const total = sum(Object.values(components));
     const phaseShift = diff => clamp(diff * PHASE_WEIGHT, -0.8, 0.8);
-    const winCurve = CURVE_MINUTES.map((m, i) => sig(total + phaseShift(cr[i] - cd[i])));
-    const avgRange = (i0, i1) => { let s = 0; for (let i = i0; i <= i1; i++) s += cr[i] - cd[i]; return s / (i1 - i0 + 1); };
-    const phases = { early: sig(total + phaseShift(avgRange(0, 3))), mid: sig(total + phaseShift(avgRange(4, 6))), late: sig(total + phaseShift(avgRange(7, 10))) };
+    // Линии тянут раннюю игру и почти не влияют на позднюю; берём уже откалиброванное слагаемое
+    // (components.lanes), а не сырое, иначе часть перевеса осталась бы стоять плоско.
+    const withoutLanes = total - components.lanes;
+    const at = (i) => sig(withoutLanes + components.lanes * laneWeightAt(CURVE_MINUTES[i]) + phaseShift(cr[i] - cd[i]));
+    const winCurve = CURVE_MINUTES.map((_, i) => at(i));
+    // Карточки стадий считаются по той же кривой, что нарисована рядом: иначе они с ней спорят.
+    const avgWin = (i0, i1) => { let s = 0; for (let i = i0; i <= i1; i++) s += winCurve[i]; return s / (i1 - i0 + 1); };
+    const phases = { early: avgWin(0, 3), mid: avgWin(4, 6), late: avgWin(7, 10) };
 
     const heroImpact = side => {
       const team = side === 'radiant' ? rad : dire, enemy = side === 'radiant' ? dire : rad;
@@ -383,8 +402,43 @@ export function createEngine(heroList, stats) {
       phases,
       impact: { radiant: heroImpact('radiant'), dire: heroImpact('dire') },
       spikes: { radiant: powerSpikes('radiant'), dire: powerSpikes('dire') },
+      plan: {
+        radiant: teamPlan('radiant', { comp: compR, lanes, phases }),
+        dire: teamPlan('dire', { comp: compD, lanes, phases }),
+      },
       insights: buildInsights({ lanes, compR, compD, winCurve, ctrPairs, synPairs, phases, total, posR, posD }),
     };
+  }
+
+  // Разбор по частям — линии, матчапы, роли — не отвечает на вопрос «а как этим играть».
+  // Здесь части сводятся в план на игру: окно силы, за счёт чего побеждать, во что упирается.
+  function teamPlan(side, { comp, lanes, phases }) {
+    const r = comp.roles;
+    const laneEdge = sum(lanes.map(l => l.total)) * (side === 'radiant' ? 1 : -1);
+    const winChance = side === 'radiant' ? phases : { early: 1 - phases.early, mid: 1 - phases.mid, late: 1 - phases.late };
+
+    let style;
+    if (r.pusher >= 5 && comp.ranged >= 3) style = 'Состав про давление на карту: ломать вышки и забирать пространство, а не копить фарм.';
+    else if (r.disabler >= 8 && r.initiator >= 4) style = 'Состав про драки: много контроля и есть кому начинать — выгодно навязывать бои, а не тянуть время.';
+    else if (r.carry >= 5 && r.durable <= 3) style = 'Состав про фарм: сила приходит с предметами, лобовые ранние драки — не его.';
+    else if (r.escape >= 6) style = 'Состав про подвижность: ротации, ловля по одному и размен карты, а не лобовые драки.';
+    else style = 'Состав без выраженного перекоса: играется от ситуации, отдельного плана не навязывает.';
+
+    // Совет по времени даётся по раскладу с этим соперником, а не по собственной кривой: состав
+    // может сам по себе усиливаться к поздней игре, но у соперника это происходит быстрее.
+    let window;
+    if (winChance.late - winChance.early > 0.04) window = 'По раскладу с этим соперником: чем дольше игра, тем лучше — ранние минуты надо пережить.';
+    else if (winChance.early - winChance.late > 0.04) window = 'По раскладу с этим соперником: затягивать невыгодно, забирать надо рано.';
+    else window = 'По раскладу с этим соперником: ровно по стадиям, выраженного окна нет.';
+
+    const notes = [];
+    if (Math.abs(laneEdge) > 900) notes.push(laneEdge > 0
+      ? 'Стадия линий за этой командой — перевес надо сразу переводить в вышки и карту.'
+      : 'Линии складываются против: нужен план на трудный старт — размены, ротации, вторая линия.');
+    const worst = comp.flags.filter(f => f.bad).slice(0, 2).map(f => f.text.replace(/ — .*/, ''));
+    if (worst.length) notes.push('Слабые места состава: ' + worst.join('; ') + '.');
+
+    return { style, window, notes };
   }
 
   function buildInsights({ lanes, compR, compD, winCurve, ctrPairs, synPairs, phases, total, posR, posD }) {
@@ -438,6 +492,30 @@ export function createEngine(heroList, stats) {
     return partial(rad, dire);
   }
 
+  // Насколько героя легко закрыть тем, что ещё не забанено и не взято. Простой матчап отвечает
+  // на вопрос «как он играет против того, что уже стоит», а капитану важнее второе: чем ответят.
+  // Забаненные контрпики сюда не попадают — потому бан и делает пик безопаснее.
+  function counterRisk(hero, pool, enemySlots) {
+    if (enemySlots <= 0) return { v: 0, by: null };
+    const threats = [];
+    for (const e of pool) {
+      if (e === hero) continue;
+      const c = ctr(e, hero);
+      if (c <= 0) continue;
+      // Вес — насколько правдоподобно, что соперник вообще возьмёт этого героя: редкий в про
+      // контрпик угрожает меньше, чем тот, которого и так пикают в половине игр.
+      threats.push({ hero: e, v: (sig(c) - 0.5) * (0.4 + contest[e]) });
+    }
+    if (!threats.length) return { v: 0, by: null };
+    threats.sort((a, b) => b.v - a.v);
+    const take = threats.slice(0, Math.min(enemySlots, 3));
+    // Вес по остроте: главную угрозу соперник и возьмёт, поэтому бан именно её должен быть заметен
+    // в оценке, а не растворяться в среднем по трём.
+    const W = [0.6, 0.27, 0.13];
+    const wsum = W.slice(0, take.length).reduce((a, b) => a + b, 0);
+    return { v: sum(take.map((t, i) => t.v * W[i])) / wsum, by: take[0].hero };
+  }
+
   function explainCandidate(h, mine, enemy) {
     const reasons = [];
     const nm = id => H.get(id).name;
@@ -472,10 +550,14 @@ export function createEngine(heroList, stats) {
     const scored = [];
     if (type === 'pick') {
       const now = evaluate(mine, enemy);
+      const enemySlots = 5 - enemy.length;
       for (const h of avail) {
         const v = evaluate([...mine, h], enemy) - now;
         const meta = contest[h] * 0.05 * (mine.length < 3 ? 1 : 0.3);
-        scored.push({ hero: h, score: v + meta, gain: v, reasons: explainCandidate(h, mine, enemy) });
+        const risk = counterRisk(h, avail, enemySlots);
+        const reasons = explainCandidate(h, mine, enemy);
+        if (risk.by && risk.v > 0.012) reasons.push(`в пуле остался ${H.get(risk.by).name}, который его закрывает`);
+        scored.push({ hero: h, score: v + meta - risk.v * RISK_WEIGHT, gain: v, risk: risk.v, riskBy: risk.by, reasons: reasons.slice(0, 3) });
       }
     } else {
       const now = evaluate(enemy, mine);
@@ -521,6 +603,11 @@ export function createEngine(heroList, stats) {
         const mine = pickedBefore[team], enemy = pickedBefore[enemyTeam];
         const pos = finalPos[hEntry.hero];
         const thenActual = sig(partial([...mine, hEntry.hero], enemy));
+        // Пул на момент хода: всё, что тогда не было забанено и не было взято. Герои, взятые
+        // соперником позже, сюда входят намеренно — на тот момент он мог взять их в ответ.
+        const poolThen = ids.filter(c => H.get(c).cm && !usedBefore.has(c));
+        const enemySlots = 5 - enemy.length;
+        const riskActual = counterRisk(hEntry.hero, poolThen, enemySlots).v;
         const cands = [];
         for (const c of ids) {
           if (!H.get(c).cm || usedBefore.has(c) || allPicked.has(c)) continue;
@@ -530,13 +617,21 @@ export function createEngine(heroList, stats) {
           const r = finalR.map(x => (team === 'radiant' && x === hEntry.hero ? c : x));
           const dd = finalD.map(x => (team === 'dire' && x === hEntry.hero ? c : x));
           const full = (team === 'radiant' ? 1 : -1) * (sig(evaluate(r, dd)) - baseProb);
-          cands.push({ hero: c, then, full, score: then * 0.65 + full * 0.35 });
+          const risk = counterRisk(c, poolThen, enemySlots);
+          cands.push({ hero: c, then, full, risk: risk.v, riskBy: risk.by, safer: riskActual - risk.v, score: then * 0.65 + full * 0.35 - risk.v * RISK_WEIGHT });
         }
         cands.sort((a, b) => b.score - a.score);
         res[team].push({
           step: hEntry.step, hero: hEntry.hero, pos,
           known: { mine: mine.slice(), enemy: enemy.slice() },
-          options: cands.slice(0, 3).map(c => ({ ...c, reasons: explainCandidate(c.hero, mine, enemy) })),
+          risk: riskActual,
+          options: cands.slice(0, 3).map(c => ({
+            ...c,
+            reasons: [
+              ...explainCandidate(c.hero, mine, enemy),
+              ...(c.safer > 0.01 ? ['сложнее закрыть ответным пиком'] : c.riskBy && c.risk > 0.012 ? [`закрывается: ${H.get(c.riskBy).name}, он тогда был свободен`] : []),
+            ].slice(0, 3),
+          })),
         });
         pickedBefore[team].push(hEntry.hero);
       }

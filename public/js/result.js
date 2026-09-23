@@ -83,7 +83,21 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
   const insights = () => `<div class="insights">${A.insights.map(i => `
     <div class="insight ${i.team}"><div><div class="who">${TEAM_NAME[i.team]}</div>${esc(i.text)}</div></div>`).join('')}</div>`;
 
+  // Разбор по частям не отвечает на вопрос «как этим играть» — план сводит части воедино.
+  const planBlock = side => {
+    const p = A.plan[side];
+    return `<div class="plan ${side}">
+      <div class="who">${TEAM_NAME[side]}</div>
+      <div class="p-style">${esc(p.style)}</div>
+      <div class="p-window">${esc(p.window)}</div>
+      ${p.notes.length ? `<ul class="p-notes">${p.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+    </div>`;
+  };
+
   const summaryTab = () => `
+    <div class="panel"><h4>Как это играется</h4>
+      <div class="two-col">${planBlock('radiant')}${planBlock('dire')}</div>
+    </div>
     <div class="two-col">
       <div class="panel"><h4>Из чего складывается оценка</h4>${contribution()}</div>
       <div class="panel"><h4>Ключевые выводы</h4>${insights()}</div>
