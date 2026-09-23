@@ -82,54 +82,79 @@
 
   <section id="screen-lobby" class="screen hidden">
     <div class="lobby">
-      <div class="lobby-head">
+      <header class="lobby-top">
         <div>
-          <div class="muted small">КОД КОМНАТЫ</div>
-          <div class="room-code" id="lobby-code">-----</div>
+          <div class="eyebrow">Лобби · Captains Mode</div>
+          <h2 class="lobby-title">Комната <span id="lobby-code">-----</span></h2>
         </div>
-        <div class="lobby-link">
-          <input id="lobby-link" readonly>
-          <button class="btn" id="btn-copy">Скопировать ссылку</button>
+        <div class="lobby-share">
+          <button class="btn primary" id="btn-copy">Скопировать ссылку для друга</button>
+          <div class="share-url" id="lobby-link-text"></div>
+          <input id="lobby-link" readonly class="visually-hidden" tabindex="-1">
         </div>
-      </div>
+      </header>
+
       <div class="seats">
         <div class="seat radiant" id="seat-radiant"></div>
-        <div class="vs">VS</div>
+        <button class="swap-btn" id="btn-swap" title="Сменить сторону">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h11l-3-3"/><path d="M17 17H6l3 3"/></svg>
+        </button>
         <div class="seat dire" id="seat-dire"></div>
       </div>
-      <div class="lobby-settings">
-        <div class="sec-title">Настройки лобби</div>
-        <div class="settings-grid">
-          <label>Первый пик
+
+      <div class="lobby-grid">
+        <section class="lobby-settings">
+          <div class="ls-head">
+            <h3>Настройки</h3>
+            <div class="presets">
+              <button data-preset="dota">Как в Dota</button>
+              <button data-preset="fast">Быстрая</button>
+              <button data-preset="notimers">Без таймеров</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="s-label">Первый пик<small>Кто начинает драфт</small></div>
             <select data-set="order">
-              <option value="coin">Жребий: победитель выбирает пик или сторону</option>
+              <option value="coin">Жребий — победитель выбирает пик или сторону</option>
               <option value="random">Случайно</option>
               <option value="radiant">Всегда у Сил Света</option>
               <option value="dire">Всегда у Сил Тьмы</option>
             </select>
-          </label>
-          <label>Бан в I фазе
-            <select data-set="firstBanTime"><option>10</option><option>15</option><option>20</option><option>30</option></select>
-          </label>
-          <label>Время на ход
-            <select data-set="turnTime"><option>15</option><option>20</option><option>30</option><option>45</option><option>60</option></select>
-          </label>
-          <label>Резервное время
-            <select data-set="reserve"><option value="0">Нет</option><option value="60">1:00</option><option value="130">2:10 (Dota)</option><option value="200">3:20</option><option value="300">5:00</option></select>
-          </label>
-          <label class="check"><input type="checkbox" data-set="timers"> Таймеры включены</label>
-          <label class="check"><input type="checkbox" data-set="hints"> Разрешить подсказки</label>
-          <label class="check"><input type="checkbox" data-set="randomBan"> Просрочен бан — банить случайного (в Dota бан пропускается)</label>
-        </div>
-        <div class="muted small" id="settings-note"></div>
-        <div><button class="btn" id="btn-swap">Сменить сторону</button> <button class="btn" id="btn-dota-preset">Как в Dota</button></div>
+          </div>
+          <div class="setting-row">
+            <div class="s-label">Таймеры<small>Ограничение времени на каждый ход</small></div>
+            <label class="switch"><input type="checkbox" data-set="timers"><span></span></label>
+          </div>
+          <div class="setting-row sub" data-needs-timers>
+            <div class="s-label">Бан в I фазе<small>секунд на каждый из первых 7 банов</small></div>
+            <select data-set="firstBanTime"><option value="10">10 с</option><option value="15">15 с</option><option value="20">20 с</option><option value="30">30 с</option></select>
+          </div>
+          <div class="setting-row sub" data-needs-timers>
+            <div class="s-label">Время на ход<small>остальные баны и все пики</small></div>
+            <select data-set="turnTime"><option value="15">15 с</option><option value="20">20 с</option><option value="30">30 с</option><option value="45">45 с</option><option value="60">60 с</option></select>
+          </div>
+          <div class="setting-row sub" data-needs-timers>
+            <div class="s-label">Резервное время<small>общий запас на весь драфт</small></div>
+            <select data-set="reserve"><option value="0">Нет</option><option value="60">1:00</option><option value="130">2:10</option><option value="200">3:20</option><option value="300">5:00</option></select>
+          </div>
+          <div class="setting-row sub" data-needs-timers>
+            <div class="s-label">Просроченный бан<small>пик по таймауту — всегда случайный герой</small></div>
+            <select data-set="randomBan"><option value="false">Пропускается (как в Dota)</option><option value="true">Случайный герой</option></select>
+          </div>
+          <div class="settings-note" id="settings-note"></div>
+        </section>
+        <aside class="lobby-side">
+          <div class="side-head">Чат</div>
+          <div class="chat lobby-chat" data-chat></div>
+          <div class="spect" id="lobby-spect"></div>
+        </aside>
       </div>
-      <div class="lobby-actions">
+
+      <footer class="lobby-actions">
         <button class="btn" id="btn-lobby-leave">Выйти</button>
-        <button class="btn primary" id="btn-start">Начать драфт</button>
-      </div>
-      <div class="muted small" id="lobby-spect"></div>
-      <div class="chat lobby-chat" data-chat></div>
+        <div class="start-hint" id="start-hint"></div>
+        <button class="btn primary big" id="btn-start">Начать драфт</button>
+      </footer>
     </div>
   </section>
 
@@ -167,14 +192,13 @@
     <div class="draft-body">
       <div class="grid-wrap">
         <div class="grid-tools">
-          <input id="hero-search" placeholder="Поиск героя…" autocomplete="off">
+          <div class="search-box"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="hero-search" placeholder="Начните печатать: pudge, шейкер, am, blink…" autocomplete="off" spellcheck="false"><span class="search-count" id="search-count"></span></div>
           <div class="role-filters" id="role-filters"></div>
-          <label class="check small"><input type="checkbox" id="hints-toggle"> Подсказки</label>
+          <label class="check small" title="Анимированные портреты в слотах пиков (тяжелее для видеокарты)"><input type="checkbox" id="portraits-toggle"> Анимация</label>
         </div>
         <div class="hero-grid" id="hero-grid"></div>
       </div>
       <aside class="side-panel">
-        <div class="hints hidden" id="hints"></div>
         <div class="hero-panel" id="hero-panel">
           <div class="empty-panel">Выберите героя в сетке, чтобы увидеть способности и статистику</div>
         </div>

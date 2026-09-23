@@ -217,6 +217,12 @@ async function findMatchIdAt(ts, lo, hi) {
 }
 
 function mat() { return { g: new Int32Array(N * N), w: new Int32Array(N * N) }; }
+function durBin(sec) {
+  const m = sec / 60;
+  let b = 0;
+  for (let i = 0; i < DUR_BINS.length; i++) if (m >= DUR_BINS[i]) b = i;
+  return b;
+}
 
 async function buildPub() {
   const maxRow = await sql('SELECT max(match_id) m FROM public_matches');
@@ -230,12 +236,6 @@ async function buildPub() {
   const vs = mat();
   let matches = 0;
 
-  const binOf = sec => {
-    const m = sec / 60;
-    let b = 0;
-    for (let i = 0; i < DUR_BINS.length; i++) if (m >= DUR_BINS[i]) b = i;
-    return b;
-  };
 
   const chunks = [];
   for (let a = startId; a < maxId; a += PUB_CHUNK) chunks.push([a, Math.min(a + PUB_CHUNK, maxId)]);
@@ -259,7 +259,7 @@ async function buildPub() {
     for (const [rw, d, rt, dt] of rows) {
       if (!rt || !dt || rt.length !== 5 || dt.length !== 5 || rt.includes(0) || dt.includes(0)) continue;
       matches++;
-      const bin = binOf(d);
+      const bin = durBin(d);
       for (const [team, won] of [[rt, rw], [dt, 1 - rw]]) {
         for (const h of team) {
           hero.g[h]++; hero.w[h] += won;
@@ -312,6 +312,8 @@ async function buildPro() {
     lane: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]],
   }));
   const laneVs = new Map();
+  const syn = mat(), vs = mat();
+  const dur = { g: new Int32Array(N * DUR_BINS.length), w: new Int32Array(N * DUR_BINS.length) };
   let matches = 0;
 
   const assign = team => {
@@ -327,9 +329,22 @@ async function buildPro() {
     matches++;
     const rw = rows[0].r ? 1 : 0;
     const rad = rows.filter(p => p.s < 128), dire = rows.filter(p => p.s >= 128);
+    const bin = durBin(rows[0].d || 0);
     for (const p of rows) {
       const won = (p.s < 128) === !!rw ? 1 : 0;
       hero[p.h].g++; hero[p.h].w += won;
+      dur.g[p.h * DUR_BINS.length + bin]++; dur.w[p.h * DUR_BINS.length + bin] += won;
+    }
+    for (const [team, won] of [[rad, rw], [dire, 1 - rw]]) {
+      for (let x = 0; x < team.length; x++) for (let y = x + 1; y < team.length; y++) {
+        const p = Math.min(team[x].h, team[y].h), q = Math.max(team[x].h, team[y].h);
+        syn.g[p * N + q]++; syn.w[p * N + q] += won;
+      }
+    }
+    for (const a of rad) for (const b of dire) {
+      const p = Math.min(a.h, b.h), q = Math.max(a.h, b.h);
+      vs.g[p * N + q]++;
+      vs.w[p * N + q] += (p === a.h ? rw : 1 - rw);
     }
     const ra = assign(rad), da = assign(dire);
     for (const [asg, won] of [[ra, rw], [da, 1 - rw]]) {
@@ -372,7 +387,7 @@ async function buildPro() {
     if (b.p) { h.pick++; if (b.o <= 8) h.firstPhasePick++; }
     else { h.ban++; if (b.o <= 6) h.earlyBan++; }
   }
-  return { hero, laneVs, matches, draftMatches: pbMatches.size };
+  return { hero, laneVs, syn, vs, dur, matches, draftMatches: pbMatches.size };
 }
 
 // ---------- assemble ----------
@@ -405,15 +420,18 @@ async function main() {
       pos: p.pos, posW: p.posW,
       lane: p.lane.map(([n, s]) => [n, n ? Math.round(s / n) : 0]),
       dur: DUR_BINS.map((_, b) => [pub.dur.g[id * DUR_BINS.length + b], pub.dur.w[id * DUR_BINS.length + b]]),
+      proDur: DUR_BINS.map((_, b) => [pro.dur.g[id * DUR_BINS.length + b], pro.dur.w[id * DUR_BINS.length + b]]),
     };
   }
-  const syn = [], vs = [], laneVs = [];
+  const syn = [], vs = [], laneVs = [], proSyn = [], proVs = [];
   for (let x = 0; x < ids.length; x++) for (let y = 0; y < ids.length; y++) {
     const a = ids[x], b = ids[y];
     if (a < b) {
       const k = a * N + b;
       if (pub.syn.g[k]) syn.push([a, b, pub.syn.g[k], pub.syn.w[k]]);
       if (pub.vs.g[k]) vs.push([a, b, pub.vs.g[k], pub.vs.w[k]]);
+      if (pro.syn.g[k]) proSyn.push([a, b, pro.syn.g[k], pro.syn.w[k]]);
+      if (pro.vs.g[k]) proVs.push([a, b, pro.vs.g[k], pro.vs.w[k]]);
     }
     const lv = pro.laneVs.get(a * N + b);
     if (lv) laneVs.push([a, b, lv[0], Math.round(lv[1] / lv[0])]);
@@ -425,7 +443,7 @@ async function main() {
       proSince: new Date(PRO_SINCE * 1000).toISOString().slice(0, 10),
       durBins: DUR_BINS,
     },
-    heroes: heroStats, syn, vs, laneVs,
+    heroes: heroStats, syn, vs, laneVs, proSyn, proVs,
   };
   await fs.writeFile(path.join(DATA, 'stats.json'), JSON.stringify(stats));
   console.log('done');

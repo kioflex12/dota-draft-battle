@@ -1,7 +1,7 @@
 import { createDraft, currentTurn, applyAction, clock, other, isAvailable } from './draft.js';
 
 const ORDERS = ['random', 'radiant', 'dire', 'coin'];
-const DEFAULT_SETTINGS = { order: 'random', timers: true, hints: true, randomBan: false, firstBanTime: 15, turnTime: 30, reserve: 130 };
+const DEFAULT_SETTINGS = { order: 'random', timers: true, randomBan: false, firstBanTime: 15, turnTime: 30, reserve: 130 };
 const COIN_LABEL = { first: 'первый пик', second: 'второй пик', radiant: 'Силы Света', dire: 'Силы Тьмы' };
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const pickNum = (v, allowed, def) => (allowed.includes(Number(v)) ? Number(v) : def);
@@ -12,7 +12,6 @@ export function sanitizeSettings(src = {}, base = {}) {
   const s = { ...DEFAULT_SETTINGS, ...base };
   if (ORDERS.includes(src.order)) s.order = src.order;
   if (typeof src.timers === 'boolean') s.timers = src.timers;
-  if (typeof src.hints === 'boolean') s.hints = src.hints;
   if (typeof src.randomBan === 'boolean') s.randomBan = src.randomBan;
   if (src.firstBanTime != null) s.firstBanTime = pickNum(src.firstBanTime, [10, 15, 20, 30], s.firstBanTime);
   if (src.turnTime != null) s.turnTime = pickNum(src.turnTime, [15, 20, 30, 45, 60], s.turnTime);
@@ -256,6 +255,14 @@ export class RoomManager {
         this.leave(client);
         this.send(client, { t: 'left' });
         break;
+      case 'sit': {
+        if (!room || room.phase !== 'lobby' || client.team || !['radiant', 'dire'].includes(msg.team) || room.seats[msg.team]) return;
+        room.seats[msg.team] = { name: client.name, client, token: client.token };
+        client.team = msg.team;
+        this.sys(room, `${client.name} занимает место капитана.`);
+        this.broadcast(room);
+        break;
+      }
       case 'swap': {
         if (!room || room.phase !== 'lobby' || !client.team) return;
         const target = other(client.team);

@@ -68,7 +68,8 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
     <div class="two-col">
       <div class="panel"><h4>Самый ценный герой</h4>${mvp('radiant')}${mvp('dire')}</div>
       <div class="panel"><h4>Позиции</h4>${positionsNote()}</div>
-    </div>`;
+    </div>
+    <div class="muted small">Основа оценки — ${engine.meta.proMatches.toLocaleString('ru')} про-матчей патча 7.41 (сила героев, позиции, линии, про-матчапы); ${engine.meta.pubMatches.toLocaleString('ru')} матчей Divine+ на ${engine.meta.patch} уточняют матчапы и кривые по времени.</div>`;
 
   const mvp = side => {
     const top = A.impact[side][0], low = A.impact[side][4];
@@ -77,9 +78,10 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
   };
 
   const positionsNote = () => {
-    const off = [...A.positions.radiant.map(p => ({ ...p, side: 'radiant' })), ...A.positions.dire.map(p => ({ ...p, side: 'dire' }))].filter(p => p.pen < 0);
-    if (!off.length) return '<div class="muted">Все герои обеих команд встают на свои привычные позиции — штрафов нет.</div>';
-    return `<div class="insights">${off.map(p => `<div class="insight ${p.side}"><div>${esc(H(p.hero).name)} на позиции ${p.pos + 1} (${POS_NAMES[p.pos]}) — редкая роль, только ${Math.round(p.prob * 100)}% игр. Штраф ${fmtPct(toPct(p.pen))}%.</div></div>`).join('')}</div>`;
+    const notes = [...A.positions.radiant.map(p => ({ ...p, side: 'radiant' })), ...A.positions.dire.map(p => ({ ...p, side: 'dire' }))].filter(p => p.text);
+    if (!notes.length) return '<div class="muted">Все герои обеих команд на своих привычных позициях — штрафов нет.</div>';
+    return `<div class="insights">${notes.map(p => `<div class="insight ${p.side}"><div>${esc(p.text)}</div></div>`).join('')}</div>
+      <div class="muted small" style="margin-top:8px">Штраф за нестандартную позицию назначается только если про-данные не подтверждают такой флекс.</div>`;
   };
 
   const lanesTable = () => `
@@ -125,6 +127,13 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
       </div>
     </div>`).join('') + `<div class="muted small">Сила героев на линии и личные встречи — по ${engine.meta.proMatches.toLocaleString('ru')} про-матчам с ${engine.meta.proSince}; контрпики — по ${engine.meta.pubMatches.toLocaleString('ru')} публичным матчам Divine+ патча ${engine.meta.patch}.</div>`;
 
+  const pairSrc = (p, first) => {
+    const parts = [];
+    if (p.pro?.g) parts.push(`про: ${p.pro.g} игр, ${p.pro.w} побед${first ? ' ' + esc(first) : ''}`);
+    if (p.pub?.g) parts.push(`Divine+: ${p.pub.g.toLocaleString('ru')} игр`);
+    return parts.join(' · ') || 'нет данных';
+  };
+
   const cellColor = v => {
     const a = Math.min(1, Math.abs(v) / 4);
     if (Math.abs(v) < 0.35) return 'background:#0f131a;color:var(--muted)';
@@ -144,10 +153,10 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
           ${rad.map(a => `<tr><th class="rowh"><img src="${img(a)}" data-tip="${esc(H(a).name)}" alt=""></th>${dire.map(b => {
             const c = ctrMap.get(a + '-' + b);
             const v = toPct(c.v);
-            return `<td style="${cellColor(v)}" data-tip="<div class='tt-h'>${esc(H(a).name)} vs ${esc(H(b).name)}</div>${v >= 0 ? esc(H(a).name) : esc(H(b).name)} получает ${Math.abs(v).toFixed(1)}% к шансу победы в этой паре<br><span class='muted'>${c.n.toLocaleString('ru')} игр друг против друга (Divine+)</span>">${fmtPct(v)}</td>`;
+            return `<td style="${cellColor(v)}" data-tip="<div class='tt-h'>${esc(H(a).name)} vs ${esc(H(b).name)}</div>${v >= 0 ? esc(H(a).name) : esc(H(b).name)} получает ${Math.abs(v).toFixed(1)}% к шансу победы в этой паре<br><span class='muted'>${pairSrc(c, H(a).name)}</span>">${fmtPct(v)}</td>`;
           }).join('')}</tr>`).join('')}
         </table></div>
-        <div class="matrix-legend">Зелёный — герой Сил Света переигрывает героя Сил Тьмы, красный — наоборот.</div>
+        <div class="matrix-legend">Зелёный — герой Сил Света переигрывает героя Сил Тьмы, красный — наоборот. Про-встречи весят больше публичных; наведите на ячейку, чтобы увидеть выборку.</div>
       </div>
       <div class="panel">
         <h4>Матрица синергий <span class="seg" id="syn-seg"><button data-syn="radiant" class="${synSide === 'radiant' ? 'on' : ''}">Силы Света</button><button data-syn="dire" class="${synSide === 'dire' ? 'on' : ''}">Силы Тьмы</button></span></h4>
@@ -157,7 +166,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
             if (a === b) return '<td class="self"></td>';
             const s = synMap.get(a + '-' + b);
             const v = toPct(s.v);
-            return `<td style="${cellColor(v)}" data-tip="<div class='tt-h'>${esc(H(a).name)} + ${esc(H(b).name)}</div>${fmtPct(v)}% к шансу победы вместе<br><span class='muted'>${s.n.toLocaleString('ru')} совместных игр (Divine+)</span>">${fmtPct(v)}</td>`;
+            return `<td style="${cellColor(v)}" data-tip="<div class='tt-h'>${esc(H(a).name)} + ${esc(H(b).name)}</div>${fmtPct(v)}% к шансу победы вместе<br><span class='muted'>${pairSrc(s)}</span>">${fmtPct(v)}</td>`;
           }).join('')}</tr>`).join('')}
         </table></div>
       </div>`;
@@ -247,9 +256,14 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
   const altsTab = () => {
     const altRows = side => alts.picks[side].map(p => {
       const step = SEQUENCE[p.step];
+      const knownCount = p.known.mine.length + p.known.enemy.length;
+      const known = knownCount
+        ? `Известно на тот момент: ${p.known.mine.map(h => esc(H(h).name)).join(', ') || '—'} против ${p.known.enemy.map(h => esc(H(h).name)).join(', ') || '—'}`
+        : 'Первый пик драфта — соперник ещё ничего не показал';
+      const pct = v => `<span class="${v > 0.002 ? 'pos' : v < -0.002 ? 'neg' : 'muted'}">${fmtPct(v * 100)}%</span>`;
       return `<div class="alt-row">
-        <div class="orig"><img src="${img(p.hero)}" data-open="${p.hero}" alt=""><div><b>${esc(H(p.hero).name)}</b><div class="st">Пик #${p.step + 1} · фаза ${step.phase < 2 ? 'I' : step.phase < 4 ? 'II' : 'III'}</div></div></div>
-        <div class="alt-opts">${p.options.map(o => `<div class="alt-opt"><img src="${img(o.hero)}" data-open="${o.hero}" alt=""><div><div>${esc(H(o.hero).name)}</div><div class="d ${o.delta > 0.002 ? 'pos' : 'muted'}">${o.delta > 0.002 ? '+' + (o.delta * 100).toFixed(1) + '%' : 'не лучше'}</div></div><div class="why">${esc(o.reasons.join(' · ') || '—')}</div></div>`).join('')}</div>
+        <div class="orig"><img src="${img(p.hero)}" data-open="${p.hero}" alt=""><div><b>${esc(H(p.hero).name)}</b><div class="st">Пик #${p.step + 1} · фаза ${step.phase < 2 ? 'I' : step.phase < 4 ? 'II' : 'III'} · позиция ${p.pos + 1}</div><div class="st" data-tip="${known}">${knownCount ? `на столе уже ${knownCount} ${knownCount === 1 ? 'герой' : knownCount < 5 ? 'героя' : 'героев'}` : 'первый пик драфта'}</div></div></div>
+        <div class="alt-opts">${p.options.length ? p.options.map(o => `<div class="alt-opt"><img src="${img(o.hero)}" data-open="${o.hero}" alt=""><div><div>${esc(H(o.hero).name)}</div><div class="d">${pct(o.then)} <span class="muted small">тогда</span> · ${pct(o.full)} <span class="muted small">по итогу</span></div></div><div class="why">${esc(o.reasons.join(' · ') || '—')}</div></div>`).join('') : '<div class="muted small">Подходящих героев на эту позицию в пуле не осталось</div>'}</div>
       </div>`;
     }).join('');
     const heroList = (list, fmt) => `<div class="mini-list">${list.map(x => `<span class="mini-hero" data-open="${x.hero}" data-tip="${esc(x.reasons?.join(' · ') || '')}"><img src="${img(x.hero)}" alt="">${esc(H(x.hero).name)} ${fmt(x)}</span>`).join('')}</div>`;
@@ -262,7 +276,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
           <div><div class="sec-title">Стоило забанить (самые сильные пики соперника)</div>${heroList(alts.shouldBan[side], x => `<b class="pos">${fmtPct(toPct(x.v))}%</b>`)}</div>
           <div><div class="sec-title">Остались в пуле и подошли бы этому драфту</div>${heroList(alts.pool[side], x => `<b class="pos">${fmtPct(toPct(x.v))}%</b>`)}</div>
         </div>
-      </div>`).join('') + `<div class="muted small">Альтернативы — герои, доступные в момент пика и не взятые позже; процент — насколько изменился бы итоговый шанс на победу при замене (с учётом позиций, линий и матчапов).</div>`;
+      </div>`).join('') + `<div class="muted small">Альтернативы подбираются на ту же позицию, что занял реальный пик, и только из героев, доступных в тот момент. «Тогда» — насколько лучше выглядел бы пик по уже известным героям обеих команд, без знания будущих пиков; «по итогу» — изменение шанса победы в финальных составах с учётом линий и матчапов.</div>`;
   };
 
   const orderTab = () => `

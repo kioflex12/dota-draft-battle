@@ -12,13 +12,18 @@ export const ROLE_NAMES = {
 export const POS_NAMES = ['Керри', 'Мидер', 'Оффлейнер', 'Роумер', 'Саппорт'];
 export const POS_SHORT = ['1', '2', '3', '4', '5'];
 
-const K_BASE = 200;
-const K_PAIR = 250;
-const K_PHASE = 150;
+const K_PUB = 200;
+const K_PRO = 60;
+const K_PAIR_PUB = 250;
+const K_PAIR_PRO = 20;
+const K_PHASE_PUB = 150;
+const K_PHASE_PRO = 25;
 const K_LANE = 20;
 const K_LANE_PAIR = 12;
 const LANE_TO_LOGIT = 0.00006;
 const PHASE_WEIGHT = 0.45;
+// Drafts rarely decide more than ~75/25 in real Dota; the raw sum of signals is overconfident.
+const CAL = 0.7;
 const PHASE_CENTERS = [16, 22.5, 27.5, 32.5, 37.5, 42.5, 47.5, 55, 65];
 export const CURVE_MINUTES = [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
 
@@ -33,44 +38,70 @@ function permutations(n) {
 }
 const PERMS = [0, 1, 2, 3, 4, 5].map(permutations);
 
+const EMPTY = { pubG: 0, pubW: 0, proG: 0, proW: 0, pick: 0, ban: 0, pos: [0, 0, 0, 0, 0], posW: [0, 0, 0, 0, 0], lane: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]], dur: [], proDur: [] };
+
 export function createEngine(heroList, stats) {
   const H = new Map(heroList.map(h => [h.id, h]));
   const ids = heroList.map(h => h.id);
-  const S = id => stats.heroes[id] || { pubG: 0, pubW: 0, proG: 0, proW: 0, pick: 0, ban: 0, pos: [0, 0, 0, 0, 0], posW: [0, 0, 0, 0, 0], lane: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]], dur: [] };
+  const S = id => stats.heroes[id] || EMPTY;
   const proDrafts = Math.max(1, stats.meta.proDrafts || 1);
+  const key = (a, b) => a * 1000 + b;
 
-  const pubBase = {}, base = {}, wr = {}, proWr = {}, contest = {}, pickRate = {}, banRate = {};
+  // ---------- hero strength: pro scene first, pubs refine ----------
+  const pubBase = {}, proBase = {}, base = {}, wr = {}, proWr = {}, contest = {}, pickRate = {}, banRate = {};
+  let contestSum = 0;
   for (const id of ids) {
     const s = S(id);
-    const p = (s.pubW + K_BASE * 0.5) / (s.pubG + K_BASE);
-    const pp = (s.proW + 30 * 0.5) / (s.proG + 30);
-    wr[id] = s.pubG ? s.pubW / s.pubG : 0.5;
-    proWr[id] = s.proG ? s.proW / s.proG : null;
-    pubBase[id] = logit(p);
-    base[id] = logit(p) * 0.85 + logit(pp) * 0.15;
     pickRate[id] = s.pick / proDrafts;
     banRate[id] = s.ban / proDrafts;
     contest[id] = (s.pick + s.ban) / proDrafts;
+    contestSum += contest[id];
+  }
+  const avgContest = contestSum / ids.length;
+  const metaTerm = {};
+  for (const id of ids) {
+    const s = S(id);
+    wr[id] = s.pubG ? s.pubW / s.pubG : 0.5;
+    proWr[id] = s.proG ? s.proW / s.proG : null;
+    pubBase[id] = logit((s.pubW + K_PUB * 0.5) / (s.pubG + K_PUB));
+    proBase[id] = logit((s.proW + K_PRO * 0.5) / (s.proG + K_PRO));
+    metaTerm[id] = clamp(0.5 * Math.log((contest[id] + 0.04) / (avgContest + 0.04)), -0.12, 0.2);
+    base[id] = 0.35 * pubBase[id] + 0.45 * proBase[id] + metaTerm[id];
   }
 
-  const synMap = new Map(), synN = new Map(), ctrMap = new Map(), ctrN = new Map();
-  const key = (a, b) => a * 1000 + b;
+  // ---------- pairs ----------
+  const pubSyn = new Map(), pubVs = new Map(), proSyn = new Map(), proVs = new Map();
+  const pairAdv = (g, w, p0, K, lim) => clamp(logit((w + K * p0) / (g + K)) - logit(p0), -lim, lim);
   for (const [a, b, g, w] of stats.syn) {
-    const p0 = sig(pubBase[a] + pubBase[b]);
-    const adv = clamp(logit((w + K_PAIR * p0) / (g + K_PAIR)) - logit(p0), -0.35, 0.35);
-    synMap.set(key(a, b), adv); synMap.set(key(b, a), adv);
-    synN.set(key(a, b), g); synN.set(key(b, a), g);
+    const adv = pairAdv(g, w, sig(pubBase[a] + pubBase[b]), K_PAIR_PUB, 0.35);
+    pubSyn.set(key(a, b), { g, w, adv }); pubSyn.set(key(b, a), { g, w, adv });
   }
   for (const [a, b, g, w] of stats.vs) {
-    const p0 = sig(pubBase[a] - pubBase[b]);
-    const adv = clamp(logit((w + K_PAIR * p0) / (g + K_PAIR)) - logit(p0), -0.35, 0.35);
-    ctrMap.set(key(a, b), adv); ctrMap.set(key(b, a), -adv);
-    ctrN.set(key(a, b), g); ctrN.set(key(b, a), g);
+    const adv = pairAdv(g, w, sig(pubBase[a] - pubBase[b]), K_PAIR_PUB, 0.35);
+    pubVs.set(key(a, b), { g, w, adv }); pubVs.set(key(b, a), { g, w: g - w, adv: -adv });
   }
-  const syn = (a, b) => synMap.get(key(a, b)) || 0;
-  const ctr = (a, b) => ctrMap.get(key(a, b)) || 0;
+  for (const [a, b, g, w] of stats.proSyn || []) {
+    const adv = pairAdv(g, w, sig(proBase[a] + proBase[b]), K_PAIR_PRO, 0.4);
+    proSyn.set(key(a, b), { g, w, adv }); proSyn.set(key(b, a), { g, w, adv });
+  }
+  for (const [a, b, g, w] of stats.proVs || []) {
+    const adv = pairAdv(g, w, sig(proBase[a] - proBase[b]), K_PAIR_PRO, 0.4);
+    proVs.set(key(a, b), { g, w, adv }); proVs.set(key(b, a), { g, w: g - w, adv: -adv });
+  }
+  // Pro evidence outweighs pubs as its sample grows; the blend never exceeds the stronger of the two signals.
+  const blend = (pub, pro) => {
+    const wp = pub ? 0.6 : 0, wr = pro ? 1.4 * pro.g / (pro.g + 20) : 0;
+    return wp + wr ? ((pub?.adv || 0) * wp + (pro?.adv || 0) * wr) / (wp + wr) * 0.85 : 0;
+  };
+  const syn = (a, b) => blend(pubSyn.get(key(a, b)), proSyn.get(key(a, b)));
+  const ctr = (a, b) => blend(pubVs.get(key(a, b)), proVs.get(key(a, b)));
+  const pairInfo = (a, b, kind) => {
+    const pub = (kind === 'syn' ? pubSyn : pubVs).get(key(a, b));
+    const pro = (kind === 'syn' ? proSyn : proVs).get(key(a, b));
+    return { v: kind === 'syn' ? syn(a, b) : ctr(a, b), pub, pro };
+  };
 
-  // positions
+  // ---------- positions ----------
   const posProb = {};
   for (const id of ids) {
     const h = H.get(id), s = S(id);
@@ -87,6 +118,38 @@ export function createEngine(heroList, stats) {
     posProb[id] = s.pos.map((c, i) => (c + 10 * prior[i] / ps) / (total + 10));
   }
 
+  // Penalty for an unusual role is justified by pro results on that role, not by popularity alone.
+  function posDetail(id, pos) {
+    const s = S(id);
+    const n = s.pos[pos], w = s.posW[pos];
+    const p = posProb[id][pos];
+    const heroWr = (s.proW + 10 * 0.5) / (s.proG + 20);
+    const freqPen = p >= 0.15 ? 0 : p >= 0.07 ? -0.07 : p >= 0.03 ? -0.16 : -0.3;
+    let pen = freqPen, wrPos = null;
+    if (p >= 0.35) return { prob: p, n, w, wrPos: n ? w / n : null, pen: 0 };
+    if (n >= 6) {
+      wrPos = (w + 6 * heroWr) / (n + 6);
+      const data = clamp((logit(wrPos) - logit(heroWr)) * (n / (n + 15)), -0.25, 0.12);
+      const conf = n / (n + 10);
+      pen = Math.min(data * conf + freqPen * (1 - conf) * 0.5, 0.05);
+    }
+    return { prob: p, n, w, wrPos, pen };
+  }
+  const posAdj = (id, pos) => posDetail(id, pos).pen;
+
+  function assign(team) {
+    const n = team.length;
+    if (!n) return { pos: [], score: 0 };
+    let best = null, bestScore = -Infinity;
+    for (const perm of PERMS[n]) {
+      let sc = 0;
+      for (let i = 0; i < n; i++) sc += Math.log(posProb[team[i]][perm[i]]);
+      if (sc > bestScore) { bestScore = sc; best = perm; }
+    }
+    return { pos: best, score: bestScore };
+  }
+
+  // ---------- lanes ----------
   const laneStr = {}, laneAvg = {};
   for (const id of ids) {
     const s = S(id);
@@ -103,13 +166,15 @@ export function createEngine(heroList, stats) {
     return { v: (n / (n + K_LANE_PAIR)) * (m - (laneAvg[a] - laneAvg[b])), n, raw: m };
   };
 
-  // phase curves
+  // ---------- game phases ----------
   const phase = {};
   for (const id of ids) {
     const s = S(id);
-    const p = wr[id] || 0.5;
-    phase[id] = (s.dur || []).map(([g, w]) => logit((w + K_PHASE * p) / (g + K_PHASE)) - logit(p));
-    if (!phase[id].length) phase[id] = PHASE_CENTERS.map(() => 0);
+    const pubP = wr[id] || 0.5;
+    const proP = proWr[id] ?? 0.5;
+    const pub = (s.dur || []).map(([g, w]) => logit((w + K_PHASE_PUB * pubP) / (g + K_PHASE_PUB)) - logit(pubP));
+    const pro = (s.proDur || []).map(([g, w]) => logit((w + K_PHASE_PRO * proP) / (g + K_PHASE_PRO)) - logit(proP));
+    phase[id] = PHASE_CENTERS.map((_, i) => (pub[i] || 0) * 0.5 + (pro[i] || 0) * 0.7);
   }
   const phaseAt = (id, minute) => {
     const c = phase[id];
@@ -123,7 +188,7 @@ export function createEngine(heroList, stats) {
     return c[c.length - 1];
   };
 
-  // damage profile & tags
+  // ---------- damage profile & tags ----------
   const profile = {};
   for (const id of ids) {
     const h = H.get(id);
@@ -140,30 +205,17 @@ export function createEngine(heroList, stats) {
     profile[id] = { phys: phys / t, mag: mag / t, pure: pure / t, pierce, r };
   }
 
-  function assign(team) {
-    const n = team.length;
-    if (!n) return { pos: [], score: 0 };
-    let best = null, bestScore = -Infinity;
-    for (const perm of PERMS[n]) {
-      let sc = 0;
-      for (let i = 0; i < n; i++) sc += Math.log(posProb[team[i]][perm[i]]);
-      if (sc > bestScore) { bestScore = sc; best = perm; }
-    }
-    return { pos: best, score: bestScore };
-  }
-
-  const posPenalty = p => (p >= 0.15 ? 0 : p >= 0.07 ? -0.08 : p >= 0.03 ? -0.22 : -0.45);
-
-  function partial(A, B) {
+  function partialRaw(A, B) {
     let v = sum(A.map(a => base[a])) - sum(B.map(b => base[b]));
     for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) v += syn(A[i], A[j]);
     for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) v -= syn(B[i], B[j]);
     for (const a of A) for (const b of B) v += ctr(a, b);
     const pa = assign(A), pb = assign(B);
-    A.forEach((a, i) => { v += posPenalty(posProb[a][pa.pos[i]]); });
-    B.forEach((b, i) => { v -= posPenalty(posProb[b][pb.pos[i]]); });
+    A.forEach((a, i) => { v += posAdj(a, pa.pos[i]); });
+    B.forEach((b, i) => { v -= posAdj(b, pb.pos[i]); });
     return v;
   }
+  const partial = (A, B) => partialRaw(A, B) * CAL;
 
   function laneMatch(Aheroes, Bheroes, label) {
     const reasons = [];
@@ -185,7 +237,11 @@ export function createEngine(heroList, stats) {
       if (lr.n >= 4 && Math.abs(lr.raw) > 300) reasons.push({ side: lr.raw > 0 ? 'A' : 'B', text: `${H.get(a).name} против ${H.get(b).name}: ${lr.raw > 0 ? '+' : ''}${Math.round(lr.raw)} на линии в ${lr.n} про-встречах`, v: lr.v });
       const c = ctr(a, b);
       ctrTerm += c * 2500;
-      if (Math.abs(c) > 0.06) reasons.push({ side: c > 0 ? 'A' : 'B', text: `${c > 0 ? H.get(a).name : H.get(b).name} контрит ${c > 0 ? H.get(b).name : H.get(a).name} (${toPct(Math.abs(c)).toFixed(1)}% к победе в Divine+)`, v: c * 2500 });
+      if (Math.abs(c) > 0.06) {
+        const pro = proVs.get(key(a, b));
+        const src = pro && pro.g >= 5 ? `${pro.g} про-встреч` : 'Divine+';
+        reasons.push({ side: c > 0 ? 'A' : 'B', text: `${c > 0 ? H.get(a).name : H.get(b).name} контрит ${c > 0 ? H.get(b).name : H.get(a).name} (${toPct(Math.abs(c)).toFixed(1)}% к победе, ${src})`, v: c * 2500 });
+      }
     }
     pairTerm = pairs ? pairTerm / pairs * 0.8 : 0;
 
@@ -193,14 +249,13 @@ export function createEngine(heroList, stats) {
     const rangedA = Aheroes.filter(([h]) => H.get(h).ranged).length;
     const rangedB = Bheroes.filter(([h]) => H.get(h).ranged).length;
     if (Aheroes.length === 1) {
-      if (rangedA && !rangedB) { heur += 150; reasons.push({ side: 'A', text: `Дальнобойный мидер против ближнего боя: проще харасить и добивать`, v: 150 }); }
-      if (!rangedA && rangedB) { heur -= 150; reasons.push({ side: 'B', text: `Дальнобойный мидер против ближнего боя: проще харасить и добивать`, v: -150 }); }
+      if (rangedA && !rangedB) { heur += 150; reasons.push({ side: 'A', text: 'Дальнобойный мидер против ближнего боя: проще харасить и добивать', v: 150 }); }
+      if (!rangedA && rangedB) { heur -= 150; reasons.push({ side: 'B', text: 'Дальнобойный мидер против ближнего боя: проще харасить и добивать', v: -150 }); }
     } else {
       if (rangedB === 2 && rangedA === 0) { heur -= 200; reasons.push({ side: 'B', text: 'Двое дальнобойных против двух героев ближнего боя: постоянный харас', v: -200 }); }
       if (rangedA === 2 && rangedB === 0) { heur += 200; reasons.push({ side: 'A', text: 'Двое дальнобойных против двух героев ближнего боя: постоянный харас', v: 200 }); }
-      const disA = sum(Aheroes.map(([h]) => profile[h].r.disabler)), disB = sum(Bheroes.map(([h]) => profile[h].r.disabler));
-      const nukeA = sum(Aheroes.map(([h]) => profile[h].r.nuker)), nukeB = sum(Bheroes.map(([h]) => profile[h].r.nuker));
-      const killA = disA + nukeA, killB = disB + nukeB;
+      const killA = sum(Aheroes.map(([h]) => profile[h].r.disabler + profile[h].r.nuker));
+      const killB = sum(Bheroes.map(([h]) => profile[h].r.disabler + profile[h].r.nuker));
       if (killA - killB >= 3) { heur += 120; reasons.push({ side: 'A', text: 'Больше контроля и урона на линии: высокий потенциал убийств', v: 120 }); }
       if (killB - killA >= 3) { heur -= 120; reasons.push({ side: 'B', text: 'Больше контроля и урона на линии: высокий потенциал убийств', v: -120 }); }
     }
@@ -242,8 +297,23 @@ export function createEngine(heroList, stats) {
     return { roles: r, dmg, pierce, ranged, adj, flags };
   }
 
-  function curve(team) {
-    return CURVE_MINUTES.map(m => sum(team.map(h => phaseAt(h, m))));
+  const curve = team => CURVE_MINUTES.map(m => sum(team.map(h => phaseAt(h, m))));
+
+  function positionInfo(team, asg) {
+    return team.map((h, i) => {
+      const pos = asg.pos[i];
+      const d = posDetail(h, pos);
+      const name = H.get(h).name;
+      let text = null;
+      if (d.n >= 6 && d.prob < 0.35) {
+        text = d.pen >= -0.01
+          ? `${name} на позиции ${pos + 1} (${POS_NAMES[pos]}): ${Math.round(d.prob * 100)}% про-игр, но винрейт там ${Math.round(d.wrPos * 100)}% в ${d.n} играх — флекс оправдан, штрафа нет.`
+          : `${name} на позиции ${pos + 1} (${POS_NAMES[pos]}): ${Math.round(d.prob * 100)}% про-игр, винрейт ${Math.round(d.wrPos * 100)}% в ${d.n} играх — на этой роли герой играет хуже обычного. Штраф ${toPct(d.pen).toFixed(1)}%.`;
+      } else if (d.pen < -0.01) {
+        text = `${name} на позиции ${pos + 1} (${POS_NAMES[pos]}): в про-матчах на этой роли ${d.n ? `всего ${d.n} игр` : 'не встречается'} — нет данных, что такой флекс работает. Штраф ${toPct(d.pen).toFixed(1)}%.`;
+      }
+      return { hero: h, pos, prob: d.prob, n: d.n, wrPos: d.wrPos, pen: d.pen, text };
+    });
   }
 
   function analyze(rad, dire) {
@@ -260,21 +330,20 @@ export function createEngine(heroList, stats) {
     const synPairs = { radiant: [], dire: [] };
     for (const [team, arr, k] of [[rad, 'radiant', 1], [dire, 'dire', -1]]) {
       for (let i = 0; i < 5; i++) for (let j = i + 1; j < 5; j++) {
-        const v = syn(team[i], team[j]);
-        if (k > 0) synR += v; else synD += v;
-        synPairs[arr].push({ a: team[i], b: team[j], v, n: synN.get(key(team[i], team[j])) || 0 });
+        const info = pairInfo(team[i], team[j], 'syn');
+        if (k > 0) synR += info.v; else synD += info.v;
+        synPairs[arr].push({ a: team[i], b: team[j], ...info });
       }
     }
     let counters = 0;
     const ctrPairs = [];
     for (const a of rad) for (const b of dire) {
-      const v = ctr(a, b);
-      counters += v;
-      ctrPairs.push({ a, b, v, n: ctrN.get(key(a, b)) || 0 });
+      const info = pairInfo(a, b, 'vs');
+      counters += info.v;
+      ctrPairs.push({ a, b, ...info });
     }
 
-    const posInfo = (team, asg) => team.map((h, i) => ({ hero: h, pos: asg.pos[i], prob: posProb[h][asg.pos[i]], pen: posPenalty(posProb[h][asg.pos[i]]) }));
-    const posR = posInfo(rad, ra), posD = posInfo(dire, da);
+    const posR = positionInfo(rad, ra), posD = positionInfo(dire, da);
     const positions = sum(posR.map(p => p.pen)) - sum(posD.map(p => p.pen));
 
     const lanes = [
@@ -282,64 +351,37 @@ export function createEngine(heroList, stats) {
       { key: 'mid', name: 'Центральная линия', radiantRole: 'Центр', direRole: 'Центр', ...laneMatch([[rp[1], 1]], [[dp[1], 1]], 'mid'), radiant: [rp[1]], dire: [dp[1]] },
       { key: 'top', name: 'Верхняя линия', radiantRole: 'Сложная', direRole: 'Лёгкая', ...laneMatch([[rp[2], 2], [rp[3], 3]], [[dp[0], 0], [dp[4], 4]], 'top'), radiant: [rp[2], rp[3]], dire: [dp[0], dp[4]] },
     ];
-    const laneTotal = sum(lanes.map(l => l.total));
-    const laneLogit = laneTotal * LANE_TO_LOGIT;
+    const laneLogit = sum(lanes.map(l => l.total)) * LANE_TO_LOGIT;
 
     const compR = composition(rad, ra.pos), compD = composition(dire, da.pos);
-    const comp = compR.adj - compD.adj;
-
     const cr = curve(rad), cd = curve(dire);
-    const components = {
-      heroes: heroBase, synergy: synR - synD, counters, lanes: laneLogit, positions, composition: comp,
-    };
+    const components = Object.fromEntries(Object.entries({ heroes: heroBase, synergy: synR - synD, counters, lanes: laneLogit, positions, composition: compR.adj - compD.adj }).map(([k, v]) => [k, v * CAL]));
     const total = sum(Object.values(components));
     const phaseShift = diff => clamp(diff * PHASE_WEIGHT, -0.8, 0.8);
     const winCurve = CURVE_MINUTES.map((m, i) => sig(total + phaseShift(cr[i] - cd[i])));
-
-    const phases = {
-      early: sig(total + phaseShift(avgRange(cr, cd, 0, 3))),
-      mid: sig(total + phaseShift(avgRange(cr, cd, 4, 6))),
-      late: sig(total + phaseShift(avgRange(cr, cd, 7, 10))),
-    };
+    const avgRange = (i0, i1) => { let s = 0; for (let i = i0; i <= i1; i++) s += cr[i] - cd[i]; return s / (i1 - i0 + 1); };
+    const phases = { early: sig(total + phaseShift(avgRange(0, 3))), mid: sig(total + phaseShift(avgRange(4, 6))), late: sig(total + phaseShift(avgRange(7, 10))) };
 
     const heroImpact = side => {
       const team = side === 'radiant' ? rad : dire, enemy = side === 'radiant' ? dire : rad;
-      return team.map(h => {
-        const mates = team.filter(x => x !== h);
-        const v = base[h] + sum(mates.map(m => syn(h, m))) + sum(enemy.map(e => ctr(h, e)));
-        return { hero: h, v };
-      }).sort((a, b) => b.v - a.v);
+      return team.map(h => ({ hero: h, v: base[h] + sum(team.filter(x => x !== h).map(m => syn(h, m))) + sum(enemy.map(e => ctr(h, e))) })).sort((a, b) => b.v - a.v);
     };
-
-    const powerSpikes = side => {
-      const team = side === 'radiant' ? rad : dire;
-      return team.map(h => {
-        const early = (phaseAt(h, 16) + phaseAt(h, 22.5)) / 2;
-        const late = (phaseAt(h, 47.5) + phaseAt(h, 55)) / 2;
-        return { hero: h, early, late };
-      });
-    };
+    const powerSpikes = side => (side === 'radiant' ? rad : dire).map(h => ({ hero: h, early: (phaseAt(h, 16) + phaseAt(h, 22.5)) / 2, late: (phaseAt(h, 47.5) + phaseAt(h, 55)) / 2 }));
 
     return {
       prob: sig(total), total, components,
       lanes, positions: { radiant: posR, dire: posD },
-      synergy: { radiant: synPairs.radiant, dire: synPairs.dire }, counters: ctrPairs,
+      synergy: synPairs, counters: ctrPairs,
       composition: { radiant: compR, dire: compD },
       curve: { minutes: CURVE_MINUTES, radiant: cr, dire: cd, win: winCurve },
       phases,
       impact: { radiant: heroImpact('radiant'), dire: heroImpact('dire') },
       spikes: { radiant: powerSpikes('radiant'), dire: powerSpikes('dire') },
-      insights: buildInsights({ lanes, compR, compD, winCurve, ctrPairs, synPairs, phases, total }),
+      insights: buildInsights({ lanes, compR, compD, winCurve, ctrPairs, synPairs, phases, total, posR, posD }),
     };
   }
 
-  function avgRange(cr, cd, i0, i1) {
-    let s = 0;
-    for (let i = i0; i <= i1; i++) s += cr[i] - cd[i];
-    return s / (i1 - i0 + 1);
-  }
-
-  function buildInsights({ lanes, compR, compD, winCurve, ctrPairs, synPairs, phases, total }) {
+  function buildInsights({ lanes, compR, compD, winCurve, ctrPairs, synPairs, phases, total, posR, posD }) {
     const out = [];
     const nm = id => H.get(id).name;
     const fav = total >= 0 ? 'radiant' : 'dire';
@@ -365,17 +407,19 @@ export function createEngine(heroList, stats) {
     for (const side of ['radiant', 'dire']) {
       const best = synPairs[side].slice().sort((a, b) => b.v - a.v)[0];
       if (best && best.v > 0.04) out.push({ team: side, kind: 'synergy', text: `Лучшая связка: ${nm(best.a)} + ${nm(best.b)} (+${toPct(best.v).toFixed(1)}%).` });
+      const flex = (side === 'radiant' ? posR : posD).find(p => p.text && p.pen >= -0.01);
+      if (flex) out.push({ team: side, kind: 'flex', text: flex.text });
       const comp = side === 'radiant' ? compR : compD;
       for (const f of comp.flags.filter(f => f.bad).slice(0, 2)) out.push({ team: side, kind: 'warn', text: f.text });
     }
-    out.push({ team: fav, kind: 'verdict', text: Math.abs(toPct(total)) < 3 ? 'Драфты примерно равны: исход решит игра, а не пики.' : `Драфт даёт этой стороне заметное преимущество.` });
+    out.push({ team: fav, kind: 'verdict', text: Math.abs(toPct(total)) < 3 ? 'Драфты примерно равны: исход решит игра, а не пики.' : 'Драфт даёт этой стороне заметное преимущество.' });
     return out;
   }
 
   function evaluate(rad, dire) {
     if (rad.length === 5 && dire.length === 5) {
       const ra = assign(rad), da = assign(dire);
-      let v = partial(rad, dire);
+      let v = partialRaw(rad, dire);
       const rp = {}, dp = {};
       rad.forEach((h, i) => { rp[ra.pos[i]] = h; });
       dire.forEach((h, i) => { dp[da.pos[i]] = h; });
@@ -383,7 +427,7 @@ export function createEngine(heroList, stats) {
         + laneMatch([[rp[1], 1]], [[dp[1], 1]]).total
         + laneMatch([[rp[2], 2], [rp[3], 3]], [[dp[0], 0], [dp[4], 4]]).total;
       v += lt * LANE_TO_LOGIT + composition(rad, ra.pos).adj - composition(dire, da.pos).adj;
-      return v;
+      return v * CAL;
     }
     return partial(rad, dire);
   }
@@ -400,8 +444,9 @@ export function createEngine(heroList, stats) {
       const s = syn(h, m);
       if (s > 0.03) reasons.push({ v: s, text: `связка с ${nm(m)} (+${toPct(s).toFixed(1)}%)` });
     }
-    if (base[h] > 0.04) reasons.push({ v: base[h] * 0.5, text: `сильный герой патча (${(wr[h] * 100).toFixed(1)}% побед)` });
-    if (contest[h] > 0.35) reasons.push({ v: 0.01, text: `мета про-сцены (${Math.round(contest[h] * 100)}% пиков/банов)` });
+    if (proWr[h] != null && S(h).proG >= 15 && proWr[h] > 0.53) reasons.push({ v: 0.03, text: `${Math.round(proWr[h] * 100)}% побед в про (${S(h).proG} игр)` });
+    if (contest[h] > 0.35) reasons.push({ v: 0.02, text: `мета про-сцены (${Math.round(contest[h] * 100)}% пиков/банов)` });
+    else if (base[h] > 0.04) reasons.push({ v: base[h] * 0.5, text: `сильный герой патча (${(wr[h] * 100).toFixed(1)}% побед Divine+)` });
     reasons.sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
     return reasons.slice(0, 3).map(r => r.text);
   }
@@ -450,31 +495,44 @@ export function createEngine(heroList, stats) {
     return cand[0].hero;
   }
 
+  // Alternatives are judged by what was known at the moment of the pick (earlier picks only) and
+  // must fit the role the actual hero ended up playing; hindsight against the final draft is shown separately.
   function alternatives(draft) {
     const res = { radiant: [], dire: [] };
     const finalR = draft.picks.radiant, finalD = draft.picks.dire;
     const baseProb = sig(evaluate(finalR, finalD));
+    const finalPos = {};
+    for (const team of [finalR, finalD]) {
+      const asg = assign(team);
+      team.forEach((h, i) => { finalPos[h] = asg.pos[i]; });
+    }
     const allPicked = new Set([...finalR, ...finalD]);
     const usedBefore = new Set();
+    const pickedBefore = { radiant: [], dire: [] };
     for (const hEntry of draft.history) {
       if (hEntry.type === 'pick' && hEntry.hero != null) {
-        const team = hEntry.team;
+        const team = hEntry.team, enemyTeam = team === 'radiant' ? 'dire' : 'radiant';
+        const mine = pickedBefore[team], enemy = pickedBefore[enemyTeam];
+        const pos = finalPos[hEntry.hero];
+        const thenActual = sig(partial([...mine, hEntry.hero], enemy));
         const cands = [];
         for (const c of ids) {
           if (!H.get(c).cm || usedBefore.has(c) || allPicked.has(c)) continue;
+          const d = posDetail(c, pos);
+          if (d.prob < 0.1 && !(d.n >= 6 && d.wrPos >= 0.48)) continue;
+          const then = (sig(partial([...mine, c], enemy)) - thenActual) * 0.6;
           const r = finalR.map(x => (team === 'radiant' && x === hEntry.hero ? c : x));
-          const d = finalD.map(x => (team === 'dire' && x === hEntry.hero ? c : x));
-          const p = sig(evaluate(r, d));
-          const delta = team === 'radiant' ? p - baseProb : baseProb - p;
-          cands.push({ hero: c, delta });
+          const dd = finalD.map(x => (team === 'dire' && x === hEntry.hero ? c : x));
+          const full = (team === 'radiant' ? 1 : -1) * (sig(evaluate(r, dd)) - baseProb);
+          cands.push({ hero: c, then, full, score: then * 0.65 + full * 0.35 });
         }
-        cands.sort((a, b) => b.delta - a.delta);
-        const mine = (team === 'radiant' ? finalR : finalD).filter(x => x !== hEntry.hero);
-        const enemy = team === 'radiant' ? finalD : finalR;
+        cands.sort((a, b) => b.score - a.score);
         res[team].push({
-          step: hEntry.step, hero: hEntry.hero,
+          step: hEntry.step, hero: hEntry.hero, pos,
+          known: { mine: mine.slice(), enemy: enemy.slice() },
           options: cands.slice(0, 3).map(c => ({ ...c, reasons: explainCandidate(c.hero, mine, enemy) })),
         });
+        pickedBefore[team].push(hEntry.hero);
       }
       if (hEntry.hero != null) usedBefore.add(hEntry.hero);
     }
@@ -506,7 +564,7 @@ export function createEngine(heroList, stats) {
 
   function heroInfo(id) {
     const s = S(id);
-    const topSyn = [], topCtr = [], weakVs = [];
+    const topSyn = [], topCtr = [];
     for (const o of ids) {
       if (o === id) continue;
       topSyn.push({ hero: o, v: syn(id, o) });
@@ -517,13 +575,13 @@ export function createEngine(heroList, stats) {
     return {
       wr: wr[id], pubG: s.pubG, proWr: proWr[id], proG: s.proG,
       pickRate: pickRate[id], banRate: banRate[id], contest: contest[id],
-      posProb: posProb[id], lane: laneStr[id], phase: CURVE_MINUTES.map(m => phaseAt(id, m)),
+      posProb: posProb[id], posN: s.pos, posW: s.posW, lane: laneStr[id], phase: CURVE_MINUTES.map(m => phaseAt(id, m)),
       synergy: topSyn.slice(0, 5), counters: topCtr.slice(0, 5), counteredBy: topCtr.slice(-5).reverse(),
     };
   }
 
   return {
-    ids, H, base, syn, ctr, posProb, assign, analyze, evaluate, suggest, botChoice, alternatives,
+    ids, H, base, syn, ctr, pairInfo, posProb, posDetail, assign, analyze, evaluate, suggest, botChoice, alternatives,
     heroInfo, neededPositions, prob: (r, d) => sig(evaluate(r, d)), meta: stats.meta,
   };
 }

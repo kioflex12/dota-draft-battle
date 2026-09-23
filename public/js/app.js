@@ -2,18 +2,24 @@ import { $, $$, esc, heroImg, heroRender, ATTR_ICON, ATTR_NAME, toast, bindToolt
 import { renderHeroPanel } from './heroPanel.js';
 import { renderResult } from './result.js';
 import { Net } from './net.js';
+import { buildIndex, score, norm } from './search.js';
 import { createEngine, ROLE_KEYS, ROLE_NAMES, toPct } from '../shared/analysis.js';
 import { SEQUENCE, PHASES, TEAM_NAME, currentTurn, stepSlots, usedHeroes } from '../shared/draft.js';
 
 const S = {
-  engine: null, heroes: [], byId: new Map(),
+  engine: null, heroes: [], byId: new Map(), searchIdx: null,
   net: null, room: null, you: {}, clockOffset: 0,
   screen: null, selected: null, search: '', role: null,
-  hints: store('hints') === '1', resultView: null, lastStep: -1, lastTick: -1,
-  pendingJoin: null,
+  portraits: store('portraits') === '1',
+  resultView: null, lastStep: -1, lastTick: -1, pendingJoin: null, slotsKey: null,
 };
 
 const token = store('token') || (() => { const t = Math.random().toString(36).slice(2) + Date.now().toString(36); store('token', t); return t; })();
+
+const EMBLEM = {
+  radiant: `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="32" cy="32" r="11" fill="currentColor" fill-opacity=".25"/><circle cx="32" cy="32" r="16"/>${[0, 45, 90, 135, 180, 225, 270, 315].map(a => `<line x1="32" y1="6" x2="32" y2="12" transform="rotate(${a} 32 32)"/>`).join('')}<path d="M32 2v4M62 32h-4M32 62v-4M2 32h4" opacity=".6"/></svg>`,
+  dire: `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"><path d="M32 6c3 9 12 13 12 24 0 8-5 14-12 16-7-2-12-8-12-16 0-11 9-15 12-24z" fill="currentColor" fill-opacity=".25"/><path d="M32 22c1.5 5 6 7 6 13 0 4-2.5 7-6 8-3.5-1-6-4-6-8 0-6 4.5-8 6-13z" fill="currentColor" fill-opacity=".5"/><path d="M14 46l-6 10M50 46l6 10M22 54l-2 6M42 54l2 6" opacity=".6"/></svg>`,
+};
 
 // ---------------- boot ----------------
 
@@ -22,10 +28,11 @@ async function boot() {
   S.heroes = hd.heroes;
   S.byId = new Map(S.heroes.map(h => [h.id, h]));
   S.engine = createEngine(S.heroes, st);
+  S.searchIdx = buildIndex(S.heroes);
   $('#patch-label').textContent = hd.patch;
-  $('#data-label').textContent = `${st.meta.pubMatches.toLocaleString('ru')} матчей Divine+ · ${st.meta.proMatches.toLocaleString('ru')} про-матчей`;
+  $('#data-label').textContent = `${st.meta.proMatches.toLocaleString('ru')} про-матчей с ${st.meta.proSince} · ${st.meta.pubMatches.toLocaleString('ru')} матчей Divine+`;
   $('#name-input').value = store('name') || '';
-  $('#hints-toggle').checked = S.hints;
+  $('#portraits-toggle').checked = S.portraits;
   buildGrid();
   buildRoleFilters();
   bindMenu();
@@ -98,7 +105,7 @@ function renderRoom(prev) {
   if (r.phase === 'coin') { renderCoin(prev); show('coin'); return; }
   if (r.phase === 'draft') {
     S.resultView = null;
-    if (!prev || prev.phase !== 'draft') { S.selected = null; S.lastStep = -1; renderHeroPanelFor(null); }
+    if (!prev || prev.phase !== 'draft') { S.selected = null; S.lastStep = -1; clearSearch(); renderHeroPanelFor(null); }
     renderDraft();
     show('draft');
     return;
@@ -125,7 +132,13 @@ function showResult() {
   show('result');
 }
 
-// ---------------- menu ----------------
+// ---------------- menu & lobby ----------------
+
+const PRESETS = {
+  dota: { order: 'coin', timers: true, firstBanTime: 15, turnTime: 30, reserve: 130, randomBan: false },
+  fast: { timers: true, firstBanTime: 10, turnTime: 15, reserve: 60 },
+  notimers: { timers: false },
+};
 
 function bindMenu() {
   $('#name-input').addEventListener('change', () => { store('name', myName()); send({ t: 'hello', name: myName(), token }); });
@@ -154,15 +167,23 @@ function bindMenu() {
 
   $('#btn-copy').onclick = async () => {
     try { await navigator.clipboard.writeText($('#lobby-link').value); toast('Ссылка скопирована', true); }
-    catch { $('#lobby-link').select(); }
+    catch { toast('Ссылка: ' + $('#lobby-link').value); }
   };
   $('#btn-swap').onclick = () => send({ t: 'swap' });
   $('#btn-start').onclick = () => send({ t: 'start' });
   $('#btn-lobby-leave').onclick = () => send({ t: 'leave' });
   $$('[data-set]').forEach(el => el.addEventListener('change', () => {
-    send({ t: 'settings', [el.dataset.set]: el.type === 'checkbox' ? el.checked : el.value });
+    const raw = el.type === 'checkbox' ? el.checked : el.value;
+    send({ t: 'settings', [el.dataset.set]: raw === 'true' ? true : raw === 'false' ? false : raw });
   }));
-  $('#btn-dota-preset').onclick = () => send({ t: 'settings', order: 'coin', timers: true, firstBanTime: 15, turnTime: 30, reserve: 130 });
+  $('.presets').addEventListener('click', e => {
+    const b = e.target.closest('[data-preset]');
+    if (b) send({ t: 'settings', ...PRESETS[b.dataset.preset] });
+  });
+  $('.seats').addEventListener('click', e => {
+    const b = e.target.closest('[data-sit]');
+    if (b) send({ t: 'sit', team: b.dataset.sit });
+  });
   $('#coin-opts').addEventListener('click', e => {
     const b = e.target.closest('[data-coin]');
     if (b) send({ t: 'coin', choice: b.dataset.coin });
@@ -181,31 +202,51 @@ function bindMenu() {
   document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#modal').classList.add('hidden'); });
 }
 
+function presetMatch(st) {
+  for (const [k, p] of Object.entries(PRESETS)) if (Object.entries(p).every(([f, v]) => st[f] === v)) return k;
+  return null;
+}
+
 function renderLobby() {
-  const r = S.room;
+  const r = S.room, st = r.settings;
+  const iAmCaptain = !!S.you.team;
   $('#lobby-code').textContent = r.code;
   $('#lobby-link').value = roomUrl(r.code);
+  $('#lobby-link-text').textContent = roomUrl(r.code);
   for (const t of ['radiant', 'dire']) {
     const s = r.seats[t];
-    $('#seat-' + t).innerHTML = `
+    const el = $('#seat-' + t);
+    el.classList.toggle('empty', !s);
+    el.innerHTML = `
+      <div class="emblem">${EMBLEM[t]}</div>
       <div class="side-title">${TEAM_NAME[t]}</div>
-      <div class="who ${s ? '' : 'empty'}">${s ? esc(s.name) + (S.you.team === t ? ' <span class="muted small">(вы)</span>' : '') : 'Ожидание капитана…'}</div>
-      ${s && !s.online ? '<div class="muted small">не в сети</div>' : ''}`;
+      <div class="who">${s ? esc(s.name) + (S.you.team === t ? '<span class="you-badge">ВЫ</span>' : '') : 'Свободное место'}</div>
+      ${s
+        ? `<div class="status"><span class="dot ${s.online ? 'on' : ''}"></span>${s.bot ? 'Бот' : s.online ? 'В сети' : 'Не в сети'}</div>`
+        : iAmCaptain ? '<div class="status">Ждём второго капитана…</div>' : `<button class="btn sit" data-sit="${t}">Занять место</button>`}`;
   }
-  const st = r.settings;
   $$('[data-set]').forEach(el => {
     const v = st[el.dataset.set];
     if (el.type === 'checkbox') el.checked = !!v; else el.value = String(v);
-    el.disabled = !S.you.team || (!st.timers && ['firstBanTime', 'turnTime', 'reserve', 'randomBan'].includes(el.dataset.set));
+    el.disabled = !iAmCaptain;
   });
+  $$('[data-needs-timers]').forEach(row => row.classList.toggle('off', !st.timers));
+  const preset = presetMatch(st);
+  $$('.presets button').forEach(b => { b.classList.toggle('on', b.dataset.preset === preset); b.disabled = !iAmCaptain; });
   $('#settings-note').textContent = {
     coin: 'Жребий: победитель выбирает первый/второй пик или сторону, проигравший решает оставшееся.',
     random: 'Первый пик достанется случайной команде.',
     radiant: 'Первый пик у Сил Света; при реванше очередь переходит сопернику.',
     dire: 'Первый пик у Сил Тьмы; при реванше очередь переходит сопернику.',
-  }[st.order] + (st.timers ? ` Таймеры: баны I фазы ${st.firstBanTime} с, остальные ходы ${st.turnTime} с, резерв ${fmtTime(st.reserve)}. Просроченный пик — случайный герой, просроченный бан — ${st.randomBan ? 'случайный герой' : 'пропуск'}.` : ' Без таймеров.');
-  $('#btn-start').disabled = !(r.seats.radiant && r.seats.dire) || !S.you.team;
-  $('#btn-swap').disabled = !S.you.team;
+  }[st.order] + (st.timers
+    ? ` Таймеры: баны I фазы ${st.firstBanTime} с, остальные ходы ${st.turnTime} с, резерв ${fmtTime(st.reserve)}. Просроченный пик — случайный герой, просроченный бан — ${st.randomBan ? 'случайный герой' : 'пропуск'}.`
+    : ' Без ограничения времени.');
+  const both = r.seats.radiant && r.seats.dire;
+  $('#btn-start').disabled = !both || !iAmCaptain;
+  const hint = $('#start-hint');
+  hint.textContent = !iAmCaptain ? 'Вы зритель — начать могут только капитаны' : both ? 'Оба капитана на месте' : 'Ждём второго капитана — отправьте ссылку';
+  hint.classList.toggle('ready', !!both && iAmCaptain);
+  $('#btn-swap').disabled = !iAmCaptain || !!r.seats[S.you.team === 'radiant' ? 'dire' : 'radiant'];
   $('#lobby-spect').textContent = r.spectators.length ? 'Зрители: ' + r.spectators.join(', ') : '';
 }
 
@@ -245,7 +286,7 @@ function renderChat() {
   });
 }
 
-// ---------------- draft ----------------
+// ---------------- draft: grid, search ----------------
 
 function buildGrid() {
   const grid = $('#hero-grid');
@@ -263,20 +304,31 @@ function buildRoleFilters() {
 }
 
 function bindDraft() {
+  const search = $('#hero-search');
   $('#hero-grid').addEventListener('click', e => {
     const c = e.target.closest('[data-hero]');
-    if (!c) return;
-    selectHero(Number(c.dataset.hero));
+    if (c) selectHero(Number(c.dataset.hero));
   });
   $('#hero-grid').addEventListener('dblclick', e => {
     const c = e.target.closest('[data-hero]');
     if (c && canAct()) lockIn(Number(c.dataset.hero));
   });
-  $('#hero-search').addEventListener('input', e => { S.search = e.target.value.trim().toLowerCase(); applyGridFilter(); });
-  $('#hero-search').addEventListener('keydown', e => {
-    if (e.key !== 'Enter') return;
-    const first = $$('.hcell:not(.dim):not(.used)')[0];
-    if (first) selectHero(Number(first.dataset.hero));
+  search.addEventListener('input', e => { S.search = e.target.value; applyGridFilter(); });
+  search.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const best = $('.hcell.best') || $$('.hcell:not(.dim):not(.used)')[0];
+      if (best) selectHero(Number(best.dataset.hero));
+      if (best && e.ctrlKey && canAct()) lockIn(Number(best.dataset.hero));
+    } else if (e.key === 'Escape') { clearSearch(); search.blur(); }
+  });
+  // Dota-style: start typing anywhere on the draft screen to search.
+  document.addEventListener('keydown', e => {
+    if (S.screen !== 'draft' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.key.length === 1 && /[\p{L}\p{N} '-]/u.test(e.key)) { search.focus(); return; }
+    if (e.key === 'Backspace') { search.focus(); e.preventDefault(); search.value = search.value.slice(0, -1); S.search = search.value; applyGridFilter(); }
+    if (e.key === 'Escape') clearSearch();
   });
   $('#role-filters').addEventListener('click', e => {
     const b = e.target.closest('[data-role]');
@@ -285,22 +337,42 @@ function bindDraft() {
     $$('#role-filters button').forEach(x => x.classList.toggle('on', x.dataset.role === S.role));
     applyGridFilter();
   });
-  $('#hints-toggle').addEventListener('change', e => { S.hints = e.target.checked; store('hints', S.hints ? '1' : '0'); renderHints(); });
-  $('#hints').addEventListener('click', e => {
-    const h = e.target.closest('[data-hint]');
-    if (h) selectHero(Number(h.dataset.hint));
+  $('#portraits-toggle').addEventListener('change', e => {
+    S.portraits = e.target.checked;
+    store('portraits', S.portraits ? '1' : '0');
+    $$('.pick-slot').forEach(s => { s.dataset.hero = ''; });
+    if (S.room?.draft) renderDraft();
   });
 }
 
-function applyGridFilter() {
-  const roleIdx = S.role ? ROLE_KEYS.indexOf(S.role) : -1;
-  $$('.hcell').forEach(c => {
-    const h = S.byId.get(Number(c.dataset.hero));
-    const matchSearch = !S.search || h.name.toLowerCase().includes(S.search) || h.key.includes(S.search);
-    const matchRole = roleIdx < 0 || (h.roleLevels?.[roleIdx] || 0) > 0;
-    c.classList.toggle('dim', !(matchSearch && matchRole));
-  });
+function clearSearch() {
+  S.search = '';
+  $('#hero-search').value = '';
+  applyGridFilter();
 }
+
+function applyGridFilter() {
+  const q = norm(S.search);
+  const roleIdx = S.role ? ROLE_KEYS.indexOf(S.role) : -1;
+  const used = S.room?.draft ? usedHeroes(S.room.draft) : new Set();
+  let best = null, bestScore = 0, count = 0;
+  for (const c of $$('.hcell')) {
+    const id = Number(c.dataset.hero);
+    const h = S.byId.get(id);
+    const sc = q ? score(S.searchIdx.get(id), q) : 1;
+    const on = sc > 0 && (roleIdx < 0 || (h.roleLevels?.[roleIdx] || 0) > 0);
+    c.classList.toggle('dim', !on);
+    c.classList.toggle('match', on && !!q);
+    c.classList.remove('best');
+    if (!on) continue;
+    count++;
+    if (q && !used.has(id) && h.cm && sc > bestScore) { best = c; bestScore = sc; }
+  }
+  if (best) best.classList.add('best');
+  $('#search-count').textContent = q ? (count ? `${count}` : 'нет') : '';
+}
+
+// ---------------- draft: state ----------------
 
 function myTurn() {
   const t = S.room?.draft && currentTurn(S.room.draft);
@@ -321,13 +393,19 @@ function selectHero(id) {
 const panelCtx = { tab: 'abilities' };
 function renderHeroPanelFor(id) {
   const root = $('#hero-panel');
-  if (id == null) { root.innerHTML = '<div class="empty-panel">Выберите героя в сетке, чтобы увидеть способности и статистику. Двойной клик — сразу выбрать.</div>'; return; }
+  if (id == null) { root.innerHTML = '<div class="empty-panel">Выберите героя в сетке или начните печатать его имя. Двойной клик или Ctrl+Enter — сразу выбрать.</div>'; return; }
   const hero = S.byId.get(id);
   panelCtx.engine = S.engine;
   panelCtx.action = lockButtonHtml(id);
   panelCtx.onAct = () => lockIn(id);
   panelCtx.onOpen = selectHero;
   renderHeroPanel(root, hero, panelCtx);
+}
+
+function updateLockBar() {
+  if (S.selected == null) return;
+  const bar = $('#hero-panel .lock-bar');
+  if (bar) bar.innerHTML = lockButtonHtml(S.selected);
 }
 
 function lockButtonHtml(id) {
@@ -350,100 +428,109 @@ function lockIn(id) {
   send({ t: 'action', hero: id });
 }
 
+const portraitHtml = hero => S.portraits
+  ? `<video autoplay muted loop playsinline poster="${heroImg(hero.key)}" src="${heroRender(hero.key)}"></video>`
+  : `<img src="${heroImg(hero.key)}" alt="">`;
+
+// Slot elements are created once per draft; later updates only touch the slot whose content changed,
+// so portraits never reload on every pick.
+function ensureDraftSlots() {
+  const r = S.room, d = r.draft;
+  const key = `${r.code}|${d.firstTeam}`;
+  if (S.slotsKey === key) return;
+  S.slotsKey = key;
+  const slots = stepSlots(d);
+  for (const team of ['radiant', 'dire']) {
+    const picks = slots.filter(s => s.team === team && s.type === 'pick');
+    const bans = slots.filter(s => s.team === team && s.type === 'ban');
+    if (team === 'dire') { picks.reverse(); bans.reverse(); }
+    $(`[data-picks="${team}"]`).innerHTML = picks.map(s => `<div class="pick-slot" data-step="${s.index}" data-hero=""><span class="slot-order">${s.index + 1}</span></div>`).join('');
+    $(`[data-bans="${team}"]`).innerHTML = bans.map(s => `<div class="ban-slot" data-step="${s.index}" data-hero=""></div>`).join('');
+  }
+  $('#sequence').innerHTML = slots.map((s, i) => `${i > 0 && SEQUENCE[i - 1].phase !== s.phase ? '<div class="seq-gap"></div>' : ''}<div class="seq-step ${s.team} ${s.type}" data-step="${i}" data-hero="">${s.type === 'ban' ? 'Б' : 'П'}</div>`).join('');
+}
+
 function renderDraft() {
   const r = S.room, d = r.draft;
-  const slots = stepSlots(d);
+  ensureDraftSlots();
   const byStep = new Map(d.history.map(h => [h.step, h]));
   const turn = currentTurn(d);
   const justStep = d.history.length ? d.history[d.history.length - 1].step : -1;
   const isNewStep = justStep !== S.lastStep;
+  for (const team of ['radiant', 'dire']) $(`[data-captain="${team}"]`).textContent = r.seats[team]?.name || '';
 
-  for (const team of ['radiant', 'dire']) {
-    $(`[data-captain="${team}"]`).textContent = r.seats[team]?.name || '';
-    const pickSteps = slots.filter(s => s.team === team && s.type === 'pick');
-    const picksEl = $(`[data-picks="${team}"]`);
-    const ordered = team === 'dire' ? pickSteps.slice().reverse() : pickSteps;
-    const html = ordered.map(s => {
-      const h = byStep.get(s.index);
-      const hero = h?.hero != null ? S.byId.get(h.hero) : null;
-      const cls = ['pick-slot', hero ? 'filled' : '', turn?.index === s.index ? 'current' : '', isNewStep && s.index === justStep ? 'just' : ''].join(' ');
-      return `<div class="${cls}" data-step="${s.index}">${hero ? `<video autoplay muted loop playsinline poster="${heroImg(hero.key)}" src="${heroRender(hero.key)}"></video><div class="slot-name">${esc(hero.name)}</div>` : `<span class="slot-order">${s.index + 1}</span>`}</div>`;
-    }).join('');
-    if (picksEl.dataset.sig !== sig(team, 'pick', byStep, turn)) { picksEl.innerHTML = html; picksEl.dataset.sig = sig(team, 'pick', byStep, turn); }
-
-    const banSteps = slots.filter(s => s.team === team && s.type === 'ban');
-    const bansEl = $(`[data-bans="${team}"]`);
-    const bansHtml = (team === 'dire' ? banSteps.slice().reverse() : banSteps).map(s => {
-      const h = byStep.get(s.index);
-      const hero = h?.hero != null ? S.byId.get(h.hero) : null;
-      const cls = ['ban-slot', hero ? 'filled' : '', h && h.hero == null ? 'skipped' : '', turn?.index === s.index ? 'current' : ''].join(' ');
-      return `<div class="${cls}" ${hero ? `data-tip="Бан: ${esc(hero.name)}"` : ''}>${hero ? `<img src="${heroImg(hero.key)}" alt="">` : ''}</div>`;
-    }).join('');
-    bansEl.innerHTML = bansHtml;
+  for (const el of $$('.pick-slot')) {
+    const step = Number(el.dataset.step);
+    const h = byStep.get(step);
+    const hero = h?.hero != null ? S.byId.get(h.hero) : null;
+    const want = hero ? String(hero.id) : '';
+    if (el.dataset.hero !== want) {
+      el.dataset.hero = want;
+      el.innerHTML = hero ? `${portraitHtml(hero)}<div class="slot-name">${esc(hero.name)}</div>` : `<span class="slot-order">${step + 1}</span>`;
+      el.classList.toggle('filled', !!hero);
+      if (hero && isNewStep && step === justStep) { el.classList.remove('just'); void el.offsetWidth; el.classList.add('just'); }
+    }
+    el.classList.toggle('current', turn?.index === step);
+  }
+  for (const el of $$('.ban-slot')) {
+    const step = Number(el.dataset.step);
+    const h = byStep.get(step);
+    const hero = h?.hero != null ? S.byId.get(h.hero) : null;
+    const want = hero ? String(hero.id) : h ? 'skip' : '';
+    if (el.dataset.hero !== want) {
+      el.dataset.hero = want;
+      el.innerHTML = hero ? `<img src="${heroImg(hero.key)}" alt="">` : '';
+      el.classList.toggle('filled', !!hero);
+      el.classList.toggle('skipped', want === 'skip');
+      if (hero) el.dataset.tip = `Бан: ${esc(hero.name)}`; else delete el.dataset.tip;
+    }
+    el.classList.toggle('current', turn?.index === step);
+  }
+  for (const el of $$('.seq-step')) {
+    const step = Number(el.dataset.step);
+    const s = SEQUENCE[step];
+    const h = byStep.get(step);
+    const hero = h?.hero != null ? S.byId.get(h.hero) : null;
+    const want = hero ? String(hero.id) : h ? 'skip' : '';
+    if (el.dataset.hero !== want) {
+      el.dataset.hero = want;
+      el.innerHTML = hero ? `<img src="${heroImg(hero.key)}" alt="">` : (s.type === 'ban' ? 'Б' : 'П');
+      el.classList.toggle('done', !!h);
+    }
+    el.classList.toggle('current', turn?.index === step);
+    el.dataset.tip = `#${step + 1} · ${TEAM_NAME[el.classList.contains('radiant') ? 'radiant' : 'dire']} · ${s.type === 'ban' ? 'бан' : 'пик'}${hero ? ': ' + esc(hero.name) : h ? ': пропущен' : ''}`;
   }
 
-  $('#sequence').innerHTML = slots.map((s, i) => {
-    const h = byStep.get(i);
-    const hero = h?.hero != null ? S.byId.get(h.hero) : null;
-    const gap = i > 0 && SEQUENCE[i - 1].phase !== s.phase ? '<div class="seq-gap"></div>' : '';
-    return `${gap}<div class="seq-step ${s.team} ${s.type} ${h ? 'done' : ''} ${turn?.index === i ? 'current' : ''}" data-tip="#${i + 1} · ${TEAM_NAME[s.team]} · ${s.type === 'ban' ? 'бан' : 'пик'}${hero ? ': ' + esc(hero.name) : ''}">${hero ? `<img src="${heroImg(hero.key)}" alt="">` : (s.type === 'ban' ? 'Б' : 'П')}</div>`;
-  }).join('');
-
   const used = usedHeroes(d);
-  $$('.hcell').forEach(c => {
+  for (const c of $$('.hcell')) {
     const id = Number(c.dataset.hero);
     c.classList.toggle('used', used.has(id));
     c.classList.toggle('banned', d.bans.radiant.includes(id) || d.bans.dire.includes(id));
     c.classList.toggle('picked-r', d.picks.radiant.includes(id));
     c.classList.toggle('picked-d', d.picks.dire.includes(id));
-  });
+  }
 
   $('#phase-name').textContent = turn ? PHASES[turn.phase] : 'Драфт завершён';
   const tl = $('#turn-label');
   if (turn) {
     const mine = myTurn();
+    const html = `${TEAM_NAME[turn.team]} · ${turn.type === 'ban' ? 'бан' : 'пик'}${mine ? '<span class="yours">ВАШ ХОД</span>' : ''}`;
+    if (tl.dataset.html !== html) { tl.dataset.html = html; tl.innerHTML = html; }
     tl.className = 'turn-label ' + turn.team;
-    tl.innerHTML = `${TEAM_NAME[turn.team]} · ${turn.type === 'ban' ? 'бан' : 'пик'}${mine ? '<span class="yours">ВАШ ХОД</span>' : ''}`;
-  } else { tl.className = 'turn-label'; tl.textContent = ''; }
+  } else { tl.className = 'turn-label'; tl.textContent = ''; tl.dataset.html = ''; }
 
   const meter = $('#live-meter');
   const p = S.engine.prob(d.picks.radiant, d.picks.dire) * 100;
-  meter.innerHTML = `<div class="fill" style="width:${p}%"></div><div class="mid"></div>`;
+  if (!meter.firstChild) meter.innerHTML = '<div class="fill"></div><div class="mid"></div>';
+  meter.firstChild.style.width = p + '%';
   meter.dataset.tip = `Оценка драфта сейчас: Силы Света ${p.toFixed(1)}% · Силы Тьмы ${(100 - p).toFixed(1)}%`;
 
   if (isNewStep) {
     S.lastStep = justStep;
     if (myTurn()) beep(880, 0.12, 0.05);
-    if (S.selected != null && used.has(S.selected)) S.selected = null;
-    renderHeroPanelFor(S.selected);
-    renderHints();
-  } else if (S.selected != null) {
-    const bar = $('#hero-panel .lock-bar');
-    if (bar) bar.innerHTML = lockButtonHtml(S.selected);
+    if (S.search) applyGridFilter();
   }
-}
-
-const sig = (team, type, byStep, turn) => [...byStep.values()].filter(h => h.team === team && h.type === type).map(h => h.hero).join(',') + '|' + (turn?.index ?? -1);
-
-const hintsAllowed = () => S.room?.mode !== 'pvp' || S.room.settings.hints;
-
-function renderHints() {
-  const box = $('#hints');
-  const t = myTurn();
-  $('#hints-toggle').closest('label').classList.toggle('hidden', !hintsAllowed());
-  if (!S.hints || !hintsAllowed() || !t || S.room?.phase !== 'draft') { box.classList.add('hidden'); $$('.hint-badge').forEach(b => b.remove()); return; }
-  const list = S.engine.suggest(S.room.draft, t.team, t.type, 6);
-  box.classList.remove('hidden');
-  box.innerHTML = `<div class="sec-title">Подсказка: ${t.type === 'ban' ? 'кого забанить' : 'кого взять'}</div>` + list.map((s, i) => {
-    const h = S.byId.get(s.hero);
-    const g = toPct(s.gain);
-    return `<div class="hint" data-hint="${h.id}"><img src="${heroImg(h.key)}" alt=""><div><div class="nm">${i + 1}. ${esc(h.name)}</div><div class="why">${esc(s.reasons.join(' · ') || 'сильный герой в текущем драфте')}</div></div><div class="gain ${g >= 0 ? 'pos' : 'neg'}">${fmtPct(g)}%</div></div>`;
-  }).join('');
-  $$('.hint-badge').forEach(b => b.remove());
-  list.forEach((s, i) => {
-    const c = $(`.hcell[data-hero="${s.hero}"]`);
-    if (c) c.insertAdjacentHTML('beforeend', `<span class="hint-badge">${i + 1}</span>`);
-  });
+  updateLockBar();
 }
 
 function tick() {

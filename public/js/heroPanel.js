@@ -114,7 +114,8 @@ export function renderHeroPanel(root, hero, ctx) {
       </div>
       <div>
         <div class="sec-title">Позиции</div>
-        <div class="bars">${info.posProb.map((p, i) => `<div class="bar-row"><span>${i + 1} · ${POS_NAMES[i]}</span><div class="track"><i style="width:${Math.round(p * 100)}%"></i></div><span class="val">${Math.round(p * 100)}%</span></div>`).join('')}</div>
+        <div class="bars">${info.posProb.map((p, i) => `<div class="bar-row" data-tip="${info.posN[i]} про-игр на позиции${info.posN[i] ? `, ${Math.round(info.posW[i] / info.posN[i] * 100)}% побед` : ''}"><span>${i + 1} · ${POS_NAMES[i]}</span><div class="track"><i style="width:${Math.round(p * 100)}%"></i></div><span class="val">${Math.round(p * 100)}%${info.posN[i] >= 6 ? ` · ${Math.round(info.posW[i] / info.posN[i] * 100)}%` : ''}</span></div>`).join('')}</div>
+        <div class="muted small">Доля про-игр на позиции · винрейт там (если игр ≥ 6).</div>
       </div>
       <div>
         <div class="sec-title">Сила по времени игры</div>
