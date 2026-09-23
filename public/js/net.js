@@ -36,7 +36,7 @@ export class Net {
     this.mode = null;
     this.hello = { t: 'hello' };
     this.role = null;
-    if (forceP2P || location.protocol === 'file:' || location.hostname.endsWith('github.io')) this.startP2P();
+    if (forceP2P || location.protocol === 'file:' || location.hostname.endsWith('github.io')) queueMicrotask(() => this.startP2P());
     else this.connectWs(true);
   }
 

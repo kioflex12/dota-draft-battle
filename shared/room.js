@@ -1,7 +1,7 @@
 import { createDraft, currentTurn, applyAction, clock, other, isAvailable } from './draft.js';
 
 const ORDERS = ['random', 'radiant', 'dire', 'coin'];
-const DEFAULT_SETTINGS = { order: 'random', timers: true, hints: true, firstBanTime: 15, turnTime: 30, reserve: 130 };
+const DEFAULT_SETTINGS = { order: 'random', timers: true, hints: true, randomBan: false, firstBanTime: 15, turnTime: 30, reserve: 130 };
 const COIN_LABEL = { first: 'первый пик', second: 'второй пик', radiant: 'Силы Света', dire: 'Силы Тьмы' };
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const pickNum = (v, allowed, def) => (allowed.includes(Number(v)) ? Number(v) : def);
@@ -13,6 +13,7 @@ export function sanitizeSettings(src = {}, base = {}) {
   if (ORDERS.includes(src.order)) s.order = src.order;
   if (typeof src.timers === 'boolean') s.timers = src.timers;
   if (typeof src.hints === 'boolean') s.hints = src.hints;
+  if (typeof src.randomBan === 'boolean') s.randomBan = src.randomBan;
   if (src.firstBanTime != null) s.firstBanTime = pickNum(src.firstBanTime, [10, 15, 20, 30], s.firstBanTime);
   if (src.turnTime != null) s.turnTime = pickNum(src.turnTime, [15, 20, 30, 45, 60], s.turnTime);
   if (src.reserve != null) s.reserve = pickNum(src.reserve, [0, 60, 130, 200, 300], s.reserve);
@@ -178,12 +179,12 @@ export class RoomManager {
         if (c && c.expired) {
           const t = currentTurn(room.draft);
           let hero = null;
-          if (t.type === 'pick') {
+          if (t.type === 'pick' || room.settings.randomBan) {
             const avail = this.cmHeroes.filter(id => isAvailable(room.draft, id));
             hero = avail[Math.floor(Math.random() * avail.length)];
           }
           applyAction(room.draft, t.team, hero, { auto: true, now });
-          this.sys(room, t.type === 'pick' ? 'Время вышло — выбран случайный герой.' : 'Время вышло — бан пропущен.');
+          this.sys(room, t.type === 'pick' ? 'Время вышло — выбран случайный герой.' : hero != null ? 'Время вышло — забанен случайный герой.' : 'Время вышло — бан пропущен.');
           this.afterAction(room);
         }
       }
@@ -241,7 +242,7 @@ export class RoomManager {
         this.send(client, { t: 'hello', id: client.id });
         break;
       case 'create': {
-        const r = this.createRoom({ mode: ['bot', 'local'].includes(msg.mode) ? msg.mode : 'pvp', difficulty: msg.difficulty, timers: msg.timers, order: msg.order, side: msg.side, code: msg.code });
+        const r = this.createRoom({ ...msg, mode: ['bot', 'local'].includes(msg.mode) ? msg.mode : 'pvp' });
         this.joinRoom(client, r, msg.side === 'dire' ? 'dire' : 'radiant');
         break;
       }

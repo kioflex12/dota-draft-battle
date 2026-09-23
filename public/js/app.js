@@ -196,14 +196,14 @@ function renderLobby() {
   $$('[data-set]').forEach(el => {
     const v = st[el.dataset.set];
     if (el.type === 'checkbox') el.checked = !!v; else el.value = String(v);
-    el.disabled = !S.you.team || (!st.timers && ['firstBanTime', 'turnTime', 'reserve'].includes(el.dataset.set));
+    el.disabled = !S.you.team || (!st.timers && ['firstBanTime', 'turnTime', 'reserve', 'randomBan'].includes(el.dataset.set));
   });
   $('#settings-note').textContent = {
     coin: 'Жребий: победитель выбирает первый/второй пик или сторону, проигравший решает оставшееся.',
     random: 'Первый пик достанется случайной команде.',
     radiant: 'Первый пик у Сил Света; при реванше очередь переходит сопернику.',
     dire: 'Первый пик у Сил Тьмы; при реванше очередь переходит сопернику.',
-  }[st.order] + (st.timers ? ` Таймеры: баны I фазы ${st.firstBanTime} с, остальные ходы ${st.turnTime} с, резерв ${fmtTime(st.reserve)}.` : ' Без таймеров.');
+  }[st.order] + (st.timers ? ` Таймеры: баны I фазы ${st.firstBanTime} с, остальные ходы ${st.turnTime} с, резерв ${fmtTime(st.reserve)}. Просроченный пик — случайный герой, просроченный бан — ${st.randomBan ? 'случайный герой' : 'пропуск'}.` : ' Без таймеров.');
   $('#btn-start').disabled = !(r.seats.radiant && r.seats.dire) || !S.you.team;
   $('#btn-swap').disabled = !S.you.team;
   $('#lobby-spect').textContent = r.spectators.length ? 'Зрители: ' + r.spectators.join(', ') : '';
