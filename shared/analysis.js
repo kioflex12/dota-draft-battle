@@ -316,8 +316,14 @@ export function createEngine(heroList, stats) {
     });
   }
 
-  function analyze(rad, dire) {
-    const ra = assign(rad), da = assign(dire);
+  // Positions are normally guessed from pro data, but the captain knows the real plan: pass
+  // { posRadiant, posDire } — a permutation of 0..4 per team index — and the whole analysis
+  // (lanes, position penalties, composition) is rebuilt on that layout instead of the guess.
+  const validPos = (p, team) => Array.isArray(p) && p.length === team.length && new Set(p).size === team.length && p.every(v => Number.isInteger(v) && v >= 0 && v < 5);
+
+  function analyze(rad, dire, { posRadiant, posDire } = {}) {
+    const ra = validPos(posRadiant, rad) ? { pos: posRadiant, score: 0 } : assign(rad);
+    const da = validPos(posDire, dire) ? { pos: posDire, score: 0 } : assign(dire);
     const posOf = (team, asg) => {
       const map = {};
       team.forEach((h, i) => { map[asg.pos[i]] = h; });

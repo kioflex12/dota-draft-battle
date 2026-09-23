@@ -10,31 +10,55 @@ const TABS = [
 export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpenHero }) {
   const d = room.draft;
   const rad = d.picks.radiant, dire = d.picks.dire;
-  const A = engine.analyze(rad, dire);
   const alts = engine.alternatives(d);
   const H = id => engine.H.get(id);
   const img = id => heroImg(H(id).key);
   const myTeam = you.team && room.mode !== 'local' ? you.team : null;
-  const pR = A.prob * 100, pD = 100 - pR;
   let tab = 'summary';
   let synSide = myTeam || 'radiant';
 
+  // The engine guesses positions from pro data. The captain can restate them, and the whole
+  // analysis — линии, штрафы за роль, состав — пересчитывается по заявленной раскладке.
+  const layout = { radiant: null, dire: null };
+  let A, pR, pD, favored, margin, verdict, youLine;
+  const recalc = () => {
+    A = engine.analyze(rad, dire, { posRadiant: layout.radiant, posDire: layout.dire });
+    pR = A.prob * 100;
+    pD = 100 - pR;
+    favored = pR >= 50 ? 'radiant' : 'dire';
+    margin = Math.abs(pR - 50);
+    verdict = margin < 2.5 ? 'Равные драфты' : margin < 6 ? `Небольшой перевес: ${TEAM_NAME[favored]}` : margin < 12 ? `Драфт лучше у: ${TEAM_NAME[favored]}` : `Разгромный драфт: ${TEAM_NAME[favored]}`;
+    youLine = myTeam ? (favored === myTeam && margin >= 2.5 ? 'Ваш драфт сильнее' : margin < 2.5 ? 'Шансы примерно равны' : 'Драфт соперника сильнее') : '';
+  };
+  recalc();
+
+  const posOf = side => A.positions[side].map(p => p.pos);
+  const setPos = (side, idx, want) => {
+    const cur = posOf(side);
+    const held = cur.indexOf(want);
+    const was = cur[idx];
+    cur[idx] = want;
+    if (held >= 0 && held !== idx) cur[held] = was;
+    layout[side] = cur;
+    recalc();
+    draw();
+  };
+
   const name = t => room.seats[t]?.name || TEAM_NAME[t];
-  const favored = pR >= 50 ? 'radiant' : 'dire';
-  const margin = Math.abs(pR - 50);
-  const verdict = margin < 2.5 ? 'Равные драфты' : margin < 6 ? `Небольшой перевес: ${TEAM_NAME[favored]}` : margin < 12 ? `Драфт лучше у: ${TEAM_NAME[favored]}` : `Разгромный драфт: ${TEAM_NAME[favored]}`;
-  const youLine = myTeam ? (favored === myTeam && margin >= 2.5 ? 'Ваш драфт сильнее' : margin < 2.5 ? 'Шансы примерно равны' : 'Драфт соперника сильнее') : '';
 
   const teamBlock = side => {
     const pos = A.positions[side];
+    const order = pos.map((p, i) => ({ ...p, idx: i })).sort((a, b) => a.pos - b.pos);
     return `
       <div class="res-team ${side}">
-        <div class="th"><b>${TEAM_NAME[side]}</b><span class="muted">${esc(name(side))}</span></div>
+        <div class="th"><b>${TEAM_NAME[side]}</b><span class="muted">${esc(name(side))}</span>${layout[side] ? `<button class="pos-reset" data-pos-auto="${side}">вернуть авто</button>` : ''}</div>
         <div class="team-heroes">
-          ${pos.slice().sort((a, b) => a.pos - b.pos).map(p => `
+          ${order.map(p => `
             <div class="th-hero" data-open="${p.hero}" data-tip="<div class='tt-h'>${esc(H(p.hero).name)}</div>Позиция ${p.pos + 1} (${POS_NAMES[p.pos]}) — ${Math.round(p.prob * 100)}% игр героя на этой роли">
               <img src="${img(p.hero)}" alt="">
-              <span class="posn ${p.pen < 0 ? 'off' : ''}">${p.pos + 1}</span>
+              <select class="posn ${p.pen < 0 ? 'off' : ''}" data-pos-side="${side}" data-pos-idx="${p.idx}" title="Кто на какой позиции — можно поправить, разбор пересчитается">
+                ${POS_NAMES.map((n, v) => `<option value="${v}" ${v === p.pos ? 'selected' : ''}>${v + 1}</option>`).join('')}
+              </select>
               <div class="nm">${esc(H(p.hero).name)}</div>
             </div>`).join('')}
         </div>
@@ -330,7 +354,15 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
 
   const body = () => ({ summary: summaryTab, lanes: lanesTab, matchups: matchupsTab, phases: phasesTab, comp: compTab, alts: altsTab, order: orderTab })[tab]();
 
+  root.onchange = e => {
+    const sel = e.target.closest('[data-pos-side]');
+    if (sel) setPos(sel.dataset.posSide, Number(sel.dataset.posIdx), Number(sel.value));
+  };
+
   root.onclick = e => {
+    if (e.target.closest('[data-pos-side]')) return;
+    const auto = e.target.closest('[data-pos-auto]');
+    if (auto) { layout[auto.dataset.posAuto] = null; recalc(); draw(); return; }
     const t = e.target.closest('[data-rtab]');
     if (t) {
       tab = t.dataset.rtab;

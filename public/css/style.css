@@ -447,8 +447,14 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .team-heroes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 .th-hero { position: relative; border-radius: 3px; overflow: hidden; cursor: pointer; }
 .th-hero img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; }
-.th-hero .posn { position: absolute; right: 3px; bottom: 3px; background: #000c; font-family: var(--head); font-size: 12px; padding: 0 5px; border-radius: 2px; }
-.th-hero .posn.off { background: var(--bad); }
+/* The position badge is a chooser: the captain restates who plays where and the analysis follows. */
+.th-hero .posn { position: absolute; right: 3px; bottom: 22px; background: #000c; color: var(--text); font-family: var(--head); font-size: 12px; line-height: 1.5; padding: 0 2px 0 5px; border: 1px solid var(--line2); border-radius: 2px; cursor: pointer; appearance: none; }
+.th-hero .posn:hover { border-color: var(--gold); color: var(--gold); }
+.th-hero .posn:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+.th-hero .posn.off { background: var(--bad); border-color: var(--bad); }
+.th-hero .posn option { background: var(--panel); color: var(--text); }
+.pos-reset { background: none; border: 1px solid var(--line2); border-radius: 2px; color: var(--muted); font-family: var(--head); font-size: 11px; letter-spacing: .08em; padding: 0 6px; cursor: pointer; }
+.pos-reset:hover { color: var(--gold); border-color: var(--gold); }
 .th-hero .nm { font-size: 11px; text-align: center; padding: 3px 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .tabs { display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px; overflow-x: auto; }
