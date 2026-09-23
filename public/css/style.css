@@ -26,6 +26,7 @@
 }
 
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: #394453 transparent; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: #0b0f15; }
 ::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #333e4d, #1e252f); border: 1px solid #414c5b; border-radius: 6px; }

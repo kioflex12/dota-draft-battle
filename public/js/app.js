@@ -213,8 +213,21 @@ function bindMenu() {
   };
 
   $('#btn-copy').onclick = async () => {
-    try { await navigator.clipboard.writeText($('#lobby-link').value); toast('Ссылка скопирована', true); }
-    catch { toast('Ссылка: ' + $('#lobby-link').value); }
+    const field = $('#lobby-link');
+    try {
+      await navigator.clipboard.writeText(field.value);
+      toast('Ссылка скопирована', true);
+      return;
+    } catch {}
+    // navigator.clipboard exists only in a secure context, and a room shared over the local
+    // network is plain http. Fall back to selecting the text so it can be copied by hand.
+    field.classList.remove('visually-hidden');
+    field.removeAttribute('tabindex');
+    field.focus();
+    field.select();
+    let copied = false;
+    try { copied = document.execCommand('copy'); } catch {}
+    toast(copied ? 'Ссылка скопирована' : 'Скопируйте ссылку из поля выше', copied);
   };
   $('#btn-swap').onclick = () => send({ t: 'swap' });
   $('#btn-start').onclick = () => send({ t: 'start' });
@@ -378,7 +391,7 @@ function buildGrid() {
 
 function buildRoleFilters() {
   const keys = ['carry', 'support', 'nuker', 'disabler', 'durable', 'escape', 'pusher', 'initiator'];
-  $('#role-filters').innerHTML = keys.map(k => `<button data-role="${k}">${ROLE_NAMES[k]}</button>`).join('');
+  $('#role-filters').innerHTML = keys.map(k => `<button data-role="${k}" aria-pressed="false">${ROLE_NAMES[k]}</button>`).join('');
 }
 
 function bindDraft() {
@@ -399,6 +412,13 @@ function bindDraft() {
   document.addEventListener('keydown', e => {
     if (S.screen !== 'draft' || e.ctrlKey || e.metaKey || e.altKey) return;
     const tag = document.activeElement?.tagName;
+    const inSearch = document.activeElement === search;
+    // While typing, left/right still move the caret; up/down walk the matches.
+    if (e.key.startsWith('Arrow') && (!tag || tag === 'BODY' || (inSearch && (e.key === 'ArrowUp' || e.key === 'ArrowDown')))) {
+      e.preventDefault();
+      moveSelection(e.key);
+      return;
+    }
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     if (e.key.length === 1 && /[\p{L}\p{N} '-]/u.test(e.key)) { search.focus(); return; }
     if (e.key === 'Backspace') { search.focus(); e.preventDefault(); search.value = search.value.slice(0, -1); S.search = search.value; applyGridFilter(); }
@@ -408,7 +428,11 @@ function bindDraft() {
     const b = e.target.closest('[data-role]');
     if (!b) return;
     S.role = S.role === b.dataset.role ? null : b.dataset.role;
-    $$('#role-filters button').forEach(x => x.classList.toggle('on', x.dataset.role === S.role));
+    $$('#role-filters button').forEach(x => {
+      const on = x.dataset.role === S.role;
+      x.classList.toggle('on', on);
+      x.setAttribute('aria-pressed', String(on));
+    });
     applyGridFilter();
   });
   $('#touch-bar').addEventListener('click', e => { if (e.target.closest('[data-act]') && S.selected != null) lockIn(S.selected); });
@@ -419,6 +443,31 @@ function bindDraft() {
     $$('.pick-slot').forEach(s => { s.dataset.hero = ''; });
     if (S.room?.draft) renderDraft();
   });
+}
+
+function moveSelection(dir) {
+  const cells = $$('.hcell:not(.dim)');
+  if (!cells.length) return;
+  const cur = S.selected != null ? cells.find(c => Number(c.dataset.hero) === S.selected) : null;
+  if (!cur) { selectHero(Number(cells[0].dataset.hero)); cells[0].scrollIntoView({ block: 'nearest' }); return; }
+  const a = cur.getBoundingClientRect();
+  const horizontal = dir === 'ArrowLeft' || dir === 'ArrowRight';
+  const sign = dir === 'ArrowLeft' || dir === 'ArrowUp' ? -1 : 1;
+  let best = null, bestCost = Infinity;
+  for (const c of cells) {
+    if (c === cur) continue;
+    const b = c.getBoundingClientRect();
+    const dx = b.left - a.left, dy = b.top - a.top;
+    const along = horizontal ? dx : dy, across = horizontal ? dy : dx;
+    if (along * sign <= 2) continue;
+    // Prefer the nearest cell ahead in the requested direction, penalising sideways drift so the
+    // walk stays in the same row or column.
+    const cost = Math.abs(along) + Math.abs(across) * 3;
+    if (cost < bestCost) { bestCost = cost; best = c; }
+  }
+  if (!best) return;
+  selectHero(Number(best.dataset.hero));
+  best.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 function clearSearch() {
