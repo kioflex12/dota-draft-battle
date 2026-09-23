@@ -541,7 +541,12 @@ export function createEngine(heroList, stats) {
     return [0, 1, 2, 3, 4].filter(p => !a.pos.includes(p));
   }
 
-  function suggest(draft, team, type, limit = 6) {
+  // Насколько бот вообще понимает драфт. Раньше уровни отличались только случайностью выбора из
+  // одного и того же списка, поэтому «средний» играл почти как «сложный». Теперь отличается сам
+  // взгляд: слабый смотрит на силу героя в патче, сильный — на связки, контрпики и ответ соперника.
+  const SKILL = { easy: 0.25, normal: 0.7, hard: 1 };
+
+  function suggest(draft, team, type, limit = 6, skill = 1) {
     const enemyTeam = team === 'radiant' ? 'dire' : 'radiant';
     const used = new Set([...draft.picks.radiant, ...draft.picks.dire, ...draft.bans.radiant, ...draft.bans.dire]);
     const mine = draft.picks[team], enemy = draft.picks[enemyTeam];
@@ -553,18 +558,24 @@ export function createEngine(heroList, stats) {
       const enemySlots = 5 - enemy.length;
       for (const h of avail) {
         const v = evaluate([...mine, h], enemy) - now;
+        // Слабый бот видит только «сильный ли герой сам по себе», сильный — весь расклад.
+        const naive = base[h] * CAL;
+        const seen = naive + (v - naive) * skill;
         const meta = contest[h] * 0.05 * (mine.length < 3 ? 1 : 0.3);
         const risk = counterRisk(h, avail, enemySlots);
         const reasons = explainCandidate(h, mine, enemy);
         if (risk.by && risk.v > 0.012) reasons.push(`в пуле остался ${H.get(risk.by).name}, который его закрывает`);
-        scored.push({ hero: h, score: v + meta - risk.v * RISK_WEIGHT, gain: v, risk: risk.v, riskBy: risk.by, reasons: reasons.slice(0, 3) });
+        scored.push({ hero: h, score: seen + meta - risk.v * RISK_WEIGHT * skill, gain: v, risk: risk.v, riskBy: risk.by, reasons: reasons.slice(0, 3) });
       }
     } else {
       const now = evaluate(enemy, mine);
       for (const h of avail) {
         const v = evaluate([...enemy, h], mine) - now;
+        // Слабый бан идёт по популярности героя, сильный — по тому, чем герой опасен именно здесь.
+        const naive = banRate[h] * 0.3 + base[h] * CAL * 0.5;
+        const seen = naive + (v - naive) * skill;
         const meta = banRate[h] * (earlyBanPhase ? 0.12 : 0.05) + pickRate[h] * 0.03;
-        scored.push({ hero: h, score: v + meta, gain: v, reasons: explainCandidate(h, enemy, mine).map(r => 'соперникам: ' + r) });
+        scored.push({ hero: h, score: seen + meta, gain: v, reasons: explainCandidate(h, enemy, mine).map(r => 'соперникам: ' + r) });
       }
     }
     scored.sort((a, b) => b.score - a.score);
@@ -572,7 +583,8 @@ export function createEngine(heroList, stats) {
   }
 
   function botChoice(draft, team, type, difficulty = 'normal') {
-    const pool = suggest(draft, team, type, 30);
+    const skill = SKILL[difficulty] ?? SKILL.normal;
+    const pool = suggest(draft, team, type, 30, skill);
     if (!pool.length) return null;
     const cfg = { easy: { top: 25, temp: 0.12 }, normal: { top: 8, temp: 0.04 }, hard: { top: 3, temp: 0.012 } }[difficulty] || { top: 8, temp: 0.04 };
     const cand = pool.slice(0, cfg.top);
