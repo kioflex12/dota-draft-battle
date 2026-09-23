@@ -429,6 +429,34 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .banner { position: fixed; left: 50%; top: 0; transform: translateX(-50%); z-index: 60; max-width: min(720px, 94vw); padding: 8px 18px; border: 1px solid var(--bad); border-top: 0; border-radius: 0 0 6px 6px; background: #2a1512; color: #ffd9d2; font-size: 14px; text-align: center; box-shadow: 0 6px 20px rgba(0, 0, 0, .6); }
 .banner[hidden] { display: none; }
 
+/* ---------- жребий ---------- */
+/* Экран стоял без стилей: монета не рисовалась, варианты выбора шли строкой вместе с
+   пояснениями, и человек не понимал, что от него хотят. */
+.coin-wrap { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 32px 16px; text-align: center; }
+.coin { position: relative; width: 120px; height: 120px; transform-style: preserve-3d; animation: coinflip 1.5s cubic-bezier(.2, .75, .2, 1) both; }
+.coin.to-d { animation-name: coinflip-d; }
+.coin .face { position: absolute; inset: 0; border-radius: 50%; backface-visibility: hidden; display: grid; place-items: center; font-family: var(--head); font-size: 22px; letter-spacing: .1em; border: 3px solid; box-shadow: 0 10px 30px rgba(0, 0, 0, .6); }
+.coin .face.r { background: radial-gradient(circle at 35% 30%, #9be15d, #3d7520); border-color: #b6f07e; color: #16300a; }
+.coin .face.d { background: radial-gradient(circle at 35% 30%, #ff7a5c, #8d2917); border-color: #ff9f86; color: #2c0a04; transform: rotateY(180deg); }
+.coin .face.r::after { content: 'СВЕТ'; }
+.coin .face.d::after { content: 'ТЬМА'; }
+@keyframes coinflip { from { transform: rotateY(0); } to { transform: rotateY(1440deg); } }
+@keyframes coinflip-d { from { transform: rotateY(0); } to { transform: rotateY(1620deg); } }
+
+#coin-title { margin: 0; font-family: var(--head); font-size: clamp(22px, 3vw, 32px); letter-spacing: .04em; }
+#coin-sub { max-width: 620px; font-size: 15px; line-height: 1.5; }
+.coin-ask { font-family: var(--head); letter-spacing: .12em; text-transform: uppercase; font-size: 13px; color: var(--gold); }
+.coin-ask.waiting { color: var(--muted); }
+.coin-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; width: 100%; max-width: 640px; }
+.coin-opts .btn { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 14px 16px; text-align: left; font-size: 17px; }
+.coin-opts .btn small { font-family: var(--body); font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--muted); font-weight: 400; }
+.coin-opts .btn.coin-r { border-color: rgba(111, 191, 63, .6); background: linear-gradient(180deg, rgba(111, 191, 63, .16), rgba(111, 191, 63, .05)); }
+.coin-opts .btn.coin-r:hover:not(:disabled) { border-color: var(--radiant-2); }
+.coin-opts .btn.coin-d { border-color: rgba(214, 80, 58, .6); background: linear-gradient(180deg, rgba(214, 80, 58, .16), rgba(214, 80, 58, .05)); }
+.coin-opts .btn.coin-d:hover:not(:disabled) { border-color: var(--dire-2); }
+.coin-opts .btn:disabled { opacity: .45; cursor: default; filter: none; }
+.coin-wrap .chat { width: 100%; max-width: 640px; }
+
 .tooltip { position: fixed; z-index: 100; pointer-events: none; max-width: 340px; background: #0b0e13f2; border: 1px solid var(--line2); border-radius: 4px; padding: 8px 10px; font-size: 12.5px; box-shadow: 0 10px 30px #000a; }
 .tooltip .tt-h { font-family: var(--head); font-size: 16px; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 2px; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #2a1512; border: 1px solid var(--dire); padding: 10px 18px; border-radius: 4px; z-index: 120; }
@@ -654,6 +682,7 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
   .setting-row .switch { justify-self: start; }
   .lobby-actions { grid-template-columns: 1fr 1fr; }
   .start-hint { grid-column: 1 / -1; text-align: center; order: -1; }
-  .coin-opts { grid-template-columns: 1fr 1fr; }
+  .coin-wrap { min-height: 0; padding: 20px 12px; }
+  .coin { width: 92px; height: 92px; }
   .prob-bar .pct { font-size: 30px; min-width: 70px; }
 }

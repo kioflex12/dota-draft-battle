@@ -338,10 +338,10 @@ function renderLobby() {
 }
 
 const COIN_TEXT = {
-  first: ['Первый пик', 'Начинаете драфт первыми'],
-  second: ['Второй пик', 'Последнее слово в драфте'],
-  radiant: ['Силы Света', 'Нижняя лёгкая линия'],
-  dire: ['Силы Тьмы', 'Верхняя лёгкая линия'],
+  first: ['Первый пик', 'Забираете героя первыми, но и банов в первой фазе у вас на один меньше'],
+  second: ['Второй пик', 'Отвечаете на чужой пик и делаете последний выбор в драфте'],
+  radiant: ['Играть за Силы Света', 'Нижняя линия лёгкая, верхняя сложная'],
+  dire: ['Играть за Силы Тьмы', 'Верхняя линия лёгкая, нижняя сложная'],
 };
 
 function renderCoin(prev) {
@@ -354,12 +354,29 @@ function renderCoin(prev) {
     void anim.offsetWidth;
   }
   const winnerName = esc(r.seats[c.winner]?.name || TEAM_NAME[c.winner]);
-  $('#coin-title').innerHTML = `Жребий выиграл: <span style="color:${c.winner === 'radiant' ? 'var(--radiant-2)' : 'var(--dire-2)'}">${winnerName}</span>`;
+  const chooserName = esc(r.seats[chooser]?.name || TEAM_NAME[chooser]);
+  const winnerColor = c.winner === 'radiant' ? 'var(--radiant-2)' : 'var(--dire-2)';
   const opts = c.stage === 'winner' ? ['first', 'second', 'radiant', 'dire'] : (['first', 'second'].includes(c.winnerChoice) ? ['radiant', 'dire'] : ['first', 'second']);
+  const aboutOrder = ['first', 'second'].includes(opts[0]);
+
+  $('#coin-title').innerHTML = mine && c.stage === 'winner'
+    ? 'Вы выиграли жребий'
+    : `Жребий выиграл <span style="color:${winnerColor}">${winnerName}</span>`;
+
+  // Сначала одним предложением — что вообще происходит, потом отдельной строкой — что нажать.
   $('#coin-sub').innerHTML = c.stage === 'winner'
-    ? `${mine ? 'Вы выбираете' : winnerName + ' выбирает'}: очередь пика или сторону карты.`
-    : `Победитель жребия выбрал: <b>${COIN_TEXT[c.winnerChoice][0]}</b>. ${mine ? 'Теперь ваш выбор' : esc(r.seats[chooser]?.name || '') + ' выбирает'}: ${['first', 'second'].includes(c.winnerChoice) ? 'сторону' : 'очередь пика'}.`;
-  $('#coin-opts').innerHTML = opts.map(o => `<button class="btn ${o === 'first' || o === 'radiant' ? 'primary' : ''}" data-coin="${o}" ${mine ? '' : 'disabled'}>${COIN_TEXT[o][0]}<small>${COIN_TEXT[o][1]}</small></button>`).join('');
+    ? 'Победитель жребия решает что-то одно: кто ходит в драфте первым или за какую сторону карты играет. Оставшееся выбирает проигравший.'
+    : `Победитель жребия выбрал: <b>${COIN_TEXT[c.winnerChoice][0]}</b>. Остался второй вопрос — ${aboutOrder ? 'очередь пика' : 'сторона карты'}, и его решает проигравший жребий.`;
+
+  const ask = $('#coin-ask');
+  ask.textContent = mine
+    ? (c.stage === 'winner' ? 'Выберите один из четырёх вариантов' : aboutOrder ? 'Выберите очередь пика' : 'Выберите сторону')
+    : `Выбирает ${chooserName} — ждём`;
+  ask.classList.toggle('waiting', !mine);
+
+  // Стороны красим в их собственный цвет, очередь пика оставляем нейтральной: подсветка одного
+  // из равноправных вариантов читалась как совет «бери вот это».
+  $('#coin-opts').innerHTML = opts.map(o => `<button class="btn ${o === 'radiant' ? 'coin-r' : o === 'dire' ? 'coin-d' : ''}" data-coin="${o}" ${mine ? '' : 'disabled'}>${COIN_TEXT[o][0]}<small>${COIN_TEXT[o][1]}</small></button>`).join('');
 }
 
 const chatLine = m => (m.sys
