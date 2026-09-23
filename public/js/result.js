@@ -173,7 +173,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
   };
 
   const chart = () => {
-    const W = 760, Hh = 260, pl = 44, pr = 16, pt = 16, pb = 30;
+    const W = 760, Hh = 260, pl = 86, pr = 16, pt = 16, pb = 30;
     const xs = A.curve.minutes, ys = A.curve.win.map(p => p * 100);
     const minY = Math.min(35, ...ys.map(y => Math.floor(y / 5) * 5)), maxY = Math.max(65, ...ys.map(y => Math.ceil(y / 5) * 5));
     const X = m => pl + (m - xs[0]) / (xs[xs.length - 1] - xs[0]) * (W - pl - pr);
@@ -184,14 +184,18 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
       return `M${X(xs[0])},${Y(50)} L${pts.join(' L')} L${X(xs[xs.length - 1])},${Y(50)} Z`;
     };
     const grid = [];
-    for (let v = minY; v <= maxY; v += 5) grid.push(`<line x1="${pl}" x2="${W - pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v === 50 ? '#fff6' : '#ffffff12'}" ${v === 50 ? 'stroke-dasharray="4 4"' : ''}/><text x="${pl - 8}" y="${Y(v) + 4}" fill="#8b95a2" font-size="11" text-anchor="end">${v}%</text>`);
-    return `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Шанс победы Сил Света по минутам">
+    // Read as one picture for both teams: the axis names whichever side is ahead at that height, so
+    // the same line is "60% Света" above the middle and "60% Тьмы" below it.
+    const axisText = v => (v === 50 ? 'поровну' : v > 50 ? `${v}% Света` : `${100 - v}% Тьмы`);
+    const axisFill = v => (v === 50 ? '#8b95a2' : v > 50 ? '#9be15d' : '#ff7a5c');
+    for (let v = minY; v <= maxY; v += 5) grid.push(`<line x1="${pl}" x2="${W - pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v === 50 ? '#fff6' : '#ffffff12'}" ${v === 50 ? 'stroke-dasharray="4 4"' : ''}/><text x="${pl - 8}" y="${Y(v) + 4}" fill="${axisFill(v)}" font-size="11" text-anchor="end">${axisText(v)}</text>`);
+    return `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Шанс победы обеих команд в зависимости от длительности матча">
       ${grid.join('')}
       ${xs.map(m => `<text x="${X(m)}" y="${Hh - 10}" fill="#8b95a2" font-size="11" text-anchor="middle">${m}'</text>`).join('')}
       <path d="${area(true)}" fill="rgba(111,191,63,.18)"/>
       <path d="${area(false)}" fill="rgba(214,80,58,.18)"/>
       <path d="${path}" fill="none" stroke="#e3b45c" stroke-width="2.5"/>
-      ${ys.map((y, i) => `<circle cx="${X(xs[i])}" cy="${Y(y)}" r="3.5" fill="#e3b45c"><title>${xs[i]} мин: ${y.toFixed(1)}% Силы Света</title></circle>`).join('')}
+      ${ys.map((y, i) => `<circle cx="${X(xs[i])}" cy="${Y(y)}" r="3.5" fill="#e3b45c"><title>${xs[i]} мин — Силы Света ${y.toFixed(1)}%, Силы Тьмы ${(100 - y).toFixed(1)}%</title></circle>`).join('')}
       <text x="${W - pr}" y="${pt + 10}" fill="#9be15d" font-size="12" text-anchor="end">↑ Силы Света</text>
       <text x="${W - pr}" y="${Hh - pb - 6}" fill="#ff7a5c" font-size="12" text-anchor="end">↓ Силы Тьмы</text>
     </svg>`;
@@ -218,12 +222,12 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
         ${card('Мидгейм', '25–40 мин', A.phases.mid)}
         ${card('Лейтгейм', '40+ мин', A.phases.late)}
       </div>
-      <div class="panel chart"><h4>Шанс победы Сил Света в зависимости от длительности игры</h4>${chart()}</div>
+      <div class="panel chart"><h4>Чья игра по длительности матча</h4>${chart()}</div>
       <div class="two-col">
         <div class="panel"><h4>Пики силы · Силы Света</h4>${spikes('radiant')}</div>
         <div class="panel"><h4>Пики силы · Силы Тьмы</h4>${spikes('dire')}</div>
       </div>
-      <div class="muted small">Кривая строится по винрейту героев в зависимости от длительности матча (Divine+, патч ${engine.meta.patch}).</div>`;
+      <div class="muted small">Выше средней линии игра идёт в пользу Сил Света, ниже — в пользу Сил Тьмы. Кривая строится по винрейту героев в зависимости от длительности матча (Divine+, патч ${engine.meta.patch}).</div>`;
   };
 
   const compTab = () => {

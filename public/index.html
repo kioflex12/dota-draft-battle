@@ -164,30 +164,34 @@
         <div class="team-meta">
           <div class="team-name"><span class="team-dot"></span><span data-team-name="radiant">Силы Света</span></div>
           <div class="captain" data-captain="radiant"></div>
+          <div class="fp-badge" data-fp="radiant" hidden>Первый пик</div>
           <div class="reserve" data-reserve="radiant">130</div>
         </div>
-        <div class="picks" data-picks="radiant"></div>
+        <div class="team-stack">
+          <div class="picks" data-picks="radiant"></div>
+          <div class="bans" data-bans="radiant"></div>
+        </div>
       </div>
       <div class="center-clock">
         <div class="phase-name" id="phase-name">Баны · I</div>
         <div class="big-timer" id="big-timer">15</div>
         <div class="turn-label" id="turn-label"></div>
+        <div class="order-strip" id="order-strip"></div>
+        <div class="order-note" id="order-note"></div>
       </div>
       <div class="team-side dire">
-        <div class="picks" data-picks="dire"></div>
+        <div class="team-stack">
+          <div class="picks" data-picks="dire"></div>
+          <div class="bans" data-bans="dire"></div>
+        </div>
         <div class="team-meta">
           <div class="team-name"><span data-team-name="dire">Силы Тьмы</span><span class="team-dot"></span></div>
           <div class="captain" data-captain="dire"></div>
+          <div class="fp-badge" data-fp="dire" hidden>Первый пик</div>
           <div class="reserve" data-reserve="dire">130</div>
         </div>
       </div>
     </header>
-    <div class="bans-row">
-      <div class="bans" data-bans="radiant"></div>
-      <div class="win-meter" id="live-meter" title="Оценка драфта по ходу пиков"></div>
-      <div class="bans" data-bans="dire"></div>
-    </div>
-    <div class="sequence" id="sequence"></div>
 
     <div class="draft-body">
       <div class="grid-wrap">

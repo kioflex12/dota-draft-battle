@@ -1,6 +1,14 @@
 const CDN = 'https://cdn.cloudflare.steamstatic.com/apps/dota2';
 
 export const heroImg = key => `${CDN}/images/dota_react/heroes/${key}.png`;
+// Vertical portrait (235x272), framed on the hero's face. Fits portrait-shaped slots without the
+// stretching you get from cropping the 256x144 landscape card into them. A handful of the newer
+// heroes (Dawnbreaker, Marci, Muerta, Primal Beast) have no such asset, hence the fallbacks below.
+export const heroVert = key => `${CDN}/images/heroes/${key}_vert.jpg`;
+// Inline onerror: swap to the landscape card for heroes without a vertical portrait.
+export const vertFallback = key => `onerror="this.onerror=null;this.src='${heroImg(key)}'"`;
+// CSS paints the first background it can load, so the card acts as the fallback layer.
+export const heroVertBg = key => `url(${heroVert(key)}), url(${heroImg(key)})`;
 export const heroIcon = key => `${CDN}/images/dota_react/heroes/icons/${key}.png`;
 export const heroRender = key => `${CDN}/videos/dota_react/heroes/renders/${key}.webm`;
 export const heroRenderPng = key => `${CDN}/videos/dota_react/heroes/renders/${key}.png`;

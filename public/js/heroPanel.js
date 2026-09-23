@@ -1,4 +1,4 @@
-import { esc, heroImg, heroRender, heroRenderPng, abilityImg, INNATE_ICON, ATTR_ICON, ATTR_NAME, fmtPct, signCls } from './util.js';
+import { esc, heroImg, heroVertBg, heroRender, heroRenderPng, abilityImg, INNATE_ICON, ATTR_ICON, ATTR_NAME, fmtPct, signCls } from './util.js';
 import { ROLE_KEYS, ROLE_NAMES, POS_NAMES, CURVE_MINUTES, toPct } from '../shared/analysis.js';
 
 const TALENT_LEVELS = [25, 20, 15, 10];
@@ -9,9 +9,12 @@ export function renderHeroPanel(root, hero, ctx) {
   let abilIdx = hero.abilities.findIndex(a => !a.innate);
   if (abilIdx < 0) abilIdx = 0;
 
-  const draw = () => {
+  // The hero's model and the tab bar are built once. Switching a tab or an ability redraws only the
+  // content below them — rebuilding the whole panel restarted the <video> on every such click.
+  const drawShell = () => {
     root.innerHTML = `
       <div class="hp-hero">
+        <span class="hp-bg" style="background-image:${heroVertBg(hero.key)}"></span>
         <video autoplay muted loop playsinline poster="${heroRenderPng(hero.key)}" src="${heroRender(hero.key)}"></video>
         <div class="hp-title">
           <div class="nm">${esc(hero.name)}</div>
@@ -23,9 +26,14 @@ export function renderHeroPanel(root, hero, ctx) {
       </div>
       ${action ? `<div class="lock-bar">${action}</div>` : ''}
       <div class="hp-tabs">
-        ${[['abilities', 'Способности'], ['stats', 'Характеристики'], ['meta', 'Статистика']].map(([k, l]) => `<button data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}
+        ${[['abilities', 'Способности'], ['stats', 'Характеристики'], ['meta', 'Статистика']].map(([k, l]) => `<button data-tab="${k}">${l}</button>`).join('')}
       </div>
-      <div class="hp-content">${tab === 'abilities' ? abilitiesTab() : tab === 'stats' ? statsTab() : metaTab()}</div>`;
+      <div class="hp-content"></div>`;
+  };
+
+  const drawContent = () => {
+    root.querySelector('.hp-content').innerHTML = tab === 'abilities' ? abilitiesTab() : tab === 'stats' ? statsTab() : metaTab();
+    for (const b of root.querySelectorAll('[data-tab]')) b.classList.toggle('on', b.dataset.tab === tab);
   };
 
   const abilitiesTab = () => {
@@ -133,12 +141,13 @@ export function renderHeroPanel(root, hero, ctx) {
 
   root.onclick = e => {
     const t = e.target.closest('[data-tab]');
-    if (t) { tab = t.dataset.tab; ctx.tab = tab; draw(); return; }
+    if (t) { tab = t.dataset.tab; ctx.tab = tab; drawContent(); return; }
     const ab = e.target.closest('[data-abil]');
-    if (ab) { abilIdx = Number(ab.dataset.abil); draw(); return; }
+    if (ab) { abilIdx = Number(ab.dataset.abil); drawContent(); return; }
     const op = e.target.closest('[data-open]');
     if (op && ctx.onOpen) { ctx.onOpen(Number(op.dataset.open)); return; }
     if (e.target.closest('[data-act]') && ctx.onAct) ctx.onAct();
   };
-  draw();
+  drawShell();
+  drawContent();
 }

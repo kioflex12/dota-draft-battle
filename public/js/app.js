@@ -1,16 +1,16 @@
-import { $, $$, esc, heroImg, heroRender, ATTR_ICON, ATTR_NAME, toast, bindTooltip, beep, store, fmtPct } from './util.js';
+import { $, $$, esc, heroImg, heroVert, heroVertBg, vertFallback, heroRender, ATTR_ICON, ATTR_NAME, toast, bindTooltip, beep, store, fmtPct } from './util.js';
 import { renderHeroPanel } from './heroPanel.js';
 import { renderResult } from './result.js';
 import { Net } from './net.js';
 import { buildIndex, score, norm } from './search.js';
 import { createEngine, ROLE_KEYS, ROLE_NAMES, toPct } from '../shared/analysis.js';
-import { SEQUENCE, PHASES, TEAM_NAME, currentTurn, stepSlots, usedHeroes } from '../shared/draft.js';
+import { SEQUENCE, PHASES, TEAM_NAME, currentTurn, stepSlots, teamOfStep, usedHeroes } from '../shared/draft.js';
 
 const S = {
   engine: null, heroes: [], byId: new Map(), searchIdx: null,
   net: null, room: null, you: {}, clockOffset: 0,
   screen: null, selected: null, search: '', role: null,
-  portraits: store('portraits') === '1',
+  portraits: store('portraits') !== '0',
   resultView: null, lastStep: -1, lastTick: -1, pendingJoin: null, slotsKey: null,
 };
 
@@ -294,7 +294,7 @@ function buildGrid() {
   grid.innerHTML = groups.map((list, a) => `
     <div class="attr-block">
       <div class="attr-head a${a}"><img src="${ATTR_ICON[a]}" alt="">${ATTR_NAME[a]}</div>
-      <div class="attr-cells">${list.map(h => `<div class="hcell ${h.cm ? '' : 'disabled-cm'}" data-hero="${h.id}" data-tip="<div class='tt-h'>${esc(h.name)}</div>${ROLE_KEYS.filter((k, i) => (h.roleLevels?.[i] || 0) > 0).map(k => ROLE_NAMES[k]).join(' · ')}"><img loading="lazy" src="${heroImg(h.key)}" alt="${esc(h.name)}"></div>`).join('')}</div>
+      <div class="attr-cells">${list.map(h => `<div class="hcell ${h.cm ? '' : 'disabled-cm'}" data-hero="${h.id}" data-tip="<div class='tt-h'>${esc(h.name)}</div>${ROLE_KEYS.filter((k, i) => (h.roleLevels?.[i] || 0) > 0).map(k => ROLE_NAMES[k]).join(' · ')}"><img loading="lazy" src="${heroVert(h.key)}" ${vertFallback(h.key)} alt="${esc(h.name)}"><span class="hname">${esc(h.name)}</span></div>`).join('')}</div>
     </div>`).join('');
 }
 
@@ -308,10 +308,6 @@ function bindDraft() {
   $('#hero-grid').addEventListener('click', e => {
     const c = e.target.closest('[data-hero]');
     if (c) selectHero(Number(c.dataset.hero));
-  });
-  $('#hero-grid').addEventListener('dblclick', e => {
-    const c = e.target.closest('[data-hero]');
-    if (c && canAct()) lockIn(Number(c.dataset.hero));
   });
   search.addEventListener('input', e => { S.search = e.target.value; applyGridFilter(); });
   search.addEventListener('keydown', e => {
@@ -393,7 +389,7 @@ function selectHero(id) {
 const panelCtx = { tab: 'abilities' };
 function renderHeroPanelFor(id) {
   const root = $('#hero-panel');
-  if (id == null) { root.innerHTML = '<div class="empty-panel">Выберите героя в сетке или начните печатать его имя. Двойной клик или Ctrl+Enter — сразу выбрать.</div>'; return; }
+  if (id == null) { root.innerHTML = '<div class="empty-panel">Выберите героя в сетке или начните печатать его имя. Подтвердить ход — кнопкой в этой панели или Ctrl+Enter.</div>'; return; }
   const hero = S.byId.get(id);
   panelCtx.engine = S.engine;
   panelCtx.action = lockButtonHtml(id);
@@ -428,9 +424,11 @@ function lockIn(id) {
   send({ t: 'action', hero: id });
 }
 
+// The animated render has a transparent background, so it needs something behind it: the hero's own
+// portrait, blurred, both fills the slot and hides the light fringe along the model's alpha edge.
 const portraitHtml = hero => S.portraits
-  ? `<video autoplay muted loop playsinline poster="${heroImg(hero.key)}" src="${heroRender(hero.key)}"></video>`
-  : `<img src="${heroImg(hero.key)}" alt="">`;
+  ? `<span class="slot-bg" style="background-image:${heroVertBg(hero.key)}"></span><video autoplay muted loop playsinline src="${heroRender(hero.key)}"></video>`
+  : `<img src="${heroVert(hero.key)}" ${vertFallback(hero.key)} alt="">`;
 
 // Slot elements are created once per draft; later updates only touch the slot whose content changed,
 // so portraits never reload on every pick.
@@ -447,7 +445,15 @@ function ensureDraftSlots() {
     $(`[data-picks="${team}"]`).innerHTML = picks.map(s => `<div class="pick-slot" data-step="${s.index}" data-hero=""><span class="slot-order">${s.index + 1}</span></div>`).join('');
     $(`[data-bans="${team}"]`).innerHTML = bans.map(s => `<div class="ban-slot" data-step="${s.index}" data-hero=""></div>`).join('');
   }
-  $('#sequence').innerHTML = slots.map((s, i) => `${i > 0 && SEQUENCE[i - 1].phase !== s.phase ? '<div class="seq-gap"></div>' : ''}<div class="seq-step ${s.team} ${s.type}" data-step="${i}" data-hero="">${s.type === 'ban' ? 'Б' : 'П'}</div>`).join('');
+  // Order strip: what is coming, whose turn it is. Who was actually taken is already shown by the
+  // pick and ban rows, so the strip carries no portraits — that is what made it unreadable before.
+  const groups = [];
+  for (const s of slots) {
+    if (!groups.length || groups[groups.length - 1].phase !== s.phase) groups.push({ phase: s.phase, steps: [] });
+    groups[groups.length - 1].steps.push(s);
+  }
+  $('#order-strip').innerHTML = groups.map(g => `<div class="og ${SEQUENCE[g.steps[0].index].type}">${g.steps.map(s =>
+    `<i class="ostep ${s.team} ${s.type}" data-step="${s.index}"></i>`).join('')}</div>`).join('');
 }
 
 function renderDraft() {
@@ -479,27 +485,23 @@ function renderDraft() {
     const want = hero ? String(hero.id) : h ? 'skip' : '';
     if (el.dataset.hero !== want) {
       el.dataset.hero = want;
-      el.innerHTML = hero ? `<img src="${heroImg(hero.key)}" alt="">` : '';
+      el.innerHTML = hero ? `<img src="${heroVert(hero.key)}" ${vertFallback(hero.key)} alt="">` : '';
       el.classList.toggle('filled', !!hero);
       el.classList.toggle('skipped', want === 'skip');
       if (hero) el.dataset.tip = `Бан: ${esc(hero.name)}`; else delete el.dataset.tip;
     }
     el.classList.toggle('current', turn?.index === step);
   }
-  for (const el of $$('.seq-step')) {
+  for (const el of $$('.ostep')) {
     const step = Number(el.dataset.step);
     const s = SEQUENCE[step];
     const h = byStep.get(step);
     const hero = h?.hero != null ? S.byId.get(h.hero) : null;
-    const want = hero ? String(hero.id) : h ? 'skip' : '';
-    if (el.dataset.hero !== want) {
-      el.dataset.hero = want;
-      el.innerHTML = hero ? `<img src="${heroImg(hero.key)}" alt="">` : (s.type === 'ban' ? 'Б' : 'П');
-      el.classList.toggle('done', !!h);
-    }
+    el.classList.toggle('done', !!h);
     el.classList.toggle('current', turn?.index === step);
-    el.dataset.tip = `#${step + 1} · ${TEAM_NAME[el.classList.contains('radiant') ? 'radiant' : 'dire']} · ${s.type === 'ban' ? 'бан' : 'пик'}${hero ? ': ' + esc(hero.name) : h ? ': пропущен' : ''}`;
+    el.dataset.tip = `#${step + 1} · ${TEAM_NAME[teamOfStep(d, step)]} · ${s.type === 'ban' ? 'бан' : 'пик'}${hero ? ': ' + esc(hero.name) : h ? ': пропущен' : ''}`;
   }
+  renderOrderNote(d, turn);
 
   const used = usedHeroes(d);
   for (const c of $$('.hcell')) {
@@ -519,18 +521,24 @@ function renderDraft() {
     tl.className = 'turn-label ' + turn.team;
   } else { tl.className = 'turn-label'; tl.textContent = ''; tl.dataset.html = ''; }
 
-  const meter = $('#live-meter');
-  const p = S.engine.prob(d.picks.radiant, d.picks.dire) * 100;
-  if (!meter.firstChild) meter.innerHTML = '<div class="fill"></div><div class="mid"></div>';
-  meter.firstChild.style.width = p + '%';
-  meter.dataset.tip = `Оценка драфта сейчас: Силы Света ${p.toFixed(1)}% · Силы Тьмы ${(100 - p).toFixed(1)}%`;
-
   if (isNewStep) {
     S.lastStep = justStep;
     if (myTurn()) beep(880, 0.12, 0.05);
     if (S.search) applyGridFilter();
   }
   updateLockBar();
+}
+
+// Who has first pick and how much is left in this phase. The draft screen said neither, so counting
+// bans by eye ("first pick banned four times") looked like a broken order when the order was right:
+// since 7.34 the first-pick team bans 3-2-2 and the second-pick team 4-1-2.
+function renderOrderNote(d, turn) {
+  for (const team of ['radiant', 'dire']) $(`[data-fp="${team}"]`).hidden = d.firstTeam !== team;
+  const note = $('#order-note');
+  if (!turn) { note.textContent = 'Драфт завершён'; return; }
+  const left = { radiant: 0, dire: 0 };
+  for (let i = turn.index; i < SEQUENCE.length && SEQUENCE[i].phase === turn.phase; i++) left[teamOfStep(d, i)]++;
+  note.innerHTML = `Осталось ${turn.type === 'ban' ? 'банов' : 'пиков'} в фазе: <b class="r">${left.radiant}</b> · <b class="d">${left.dire}</b>`;
 }
 
 function tick() {

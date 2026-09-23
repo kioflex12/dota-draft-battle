@@ -25,7 +25,12 @@
   --body: 'Barlow', 'Segoe UI', system-ui, sans-serif;
 }
 
-* { box-sizing: border-box; }
+* { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: #394453 transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0b0f15; }
+::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #333e4d, #1e252f); border: 1px solid #414c5b; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #435063, #273039); }
+::-webkit-scrollbar-corner { background: #0b0f15; }
 html, body { margin: 0; height: 100%; }
 body {
   background: radial-gradient(1200px 600px at 50% -10%, #1a2330 0%, transparent 60%), var(--bg);
@@ -213,7 +218,7 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 }
 .team-side { display: flex; gap: 12px; align-items: stretch; min-width: 0; }
 .team-side.dire { justify-content: flex-end; }
-.team-meta { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; flex: 1 1 90px; }
+.team-meta { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; flex: 0 1 110px; }
 .team-side.dire .team-meta { text-align: right; align-items: flex-end; }
 .team-name { font-family: var(--head); font-size: clamp(13px, 1.3vw, 20px); letter-spacing: .08em; text-transform: uppercase; display: flex; align-items: center; gap: 8px; line-height: 1.05; }
 .team-side.dire .team-name { justify-content: flex-end; }
@@ -227,14 +232,16 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 
 .picks { display: flex; gap: 6px; }
 .pick-slot {
-  width: clamp(60px, 6.1vw, 108px); aspect-ratio: 3 / 4; flex: none;
+  width: clamp(56px, 6vw, 112px); aspect-ratio: 3 / 4; flex: 0 1 auto; min-width: 0;
   background: linear-gradient(180deg, #1a202a, #0f1319);
   border: 1px solid var(--line2);
   border-radius: 3px;
   position: relative; overflow: hidden;
 }
 .pick-slot img, .pick-slot video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.pick-slot img { object-position: 50% 25%; }
+.pick-slot img { object-position: 50% 12%; }
+/* The render is a transparent-background model, so it needs something behind it. */
+.slot-bg { position: absolute; inset: -8px; background-size: cover; background-position: 50% 18%; filter: blur(12px) brightness(.5) saturate(.9); }
 .pick-slot video { object-position: 50% 12%; transform: scale(1.08); transform-origin: 50% 10%; }
 .pick-slot .slot-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 4px 4px; font-size: 12px; text-align: center; background: linear-gradient(transparent, rgba(0, 0, 0, .9)); font-family: var(--head); letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pick-slot .slot-order { position: absolute; top: 3px; left: 4px; font-size: 10px; color: var(--dim); font-family: var(--head); }
@@ -257,29 +264,31 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .turn-label .yours { display: block; font-size: 12px; color: var(--gold); letter-spacing: .3em; animation: blink 1.6s ease-in-out infinite; will-change: opacity; }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 
-.bans-row { display: grid; grid-template-columns: 1fr minmax(160px, 320px) 1fr; gap: 12px; padding: 6px 14px; background: #0b0f15; align-items: center; }
+.team-stack { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.team-side.dire .team-stack { align-items: flex-end; }
 .bans { display: flex; gap: 4px; flex-wrap: wrap; }
-.bans[data-bans="dire"] { justify-content: flex-end; }
-.ban-slot { width: 46px; height: 26px; border: 1px solid var(--line); border-radius: 2px; position: relative; overflow: hidden; background: #0f131a; }
-.ban-slot img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(1) brightness(.7); }
+.team-side.dire .bans { justify-content: flex-end; }
+.ban-slot { width: clamp(30px, 3.1vw, 48px); aspect-ratio: 3 / 4; flex: 0 1 auto; min-width: 0; border: 1px solid var(--line); border-radius: 2px; position: relative; overflow: hidden; background: #0f131a; }
+.ban-slot img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 12%; filter: grayscale(1) brightness(.6); }
 .ban-slot.filled::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top right, transparent calc(50% - 1px), var(--bad) 50%, transparent calc(50% + 1px)); }
 .ban-slot.current { border-color: var(--gold); box-shadow: 0 0 10px rgba(227, 180, 92, .6); }
 .ban-slot.skipped { background: repeating-linear-gradient(45deg, #151a22 0 4px, #0f131a 4px 8px); }
 
-.win-meter { height: 8px; border-radius: 4px; background: var(--dire); position: relative; overflow: hidden; }
-.win-meter .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--radiant); transition: width .6s; }
-.win-meter .mid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: #fff8; }
-
-.sequence { display: flex; gap: 3px; padding: 6px 14px 8px; background: #0b0f15; border-bottom: 1px solid var(--line); overflow-x: auto; }
-.seq-step { flex: 1; min-width: 24px; height: 22px; border-radius: 2px; font-size: 10px; font-family: var(--head); display: grid; place-items: center; letter-spacing: .04em; position: relative; color: #fffa; opacity: .55; }
-.seq-step.radiant { background: rgba(111, 191, 63, .25); border-bottom: 2px solid var(--radiant); }
-.seq-step.dire { background: rgba(214, 80, 58, .25); border-bottom: 2px solid var(--dire); }
-.seq-step.pick { font-weight: 700; }
-.seq-step.done { opacity: .9; }
-.seq-step.current { opacity: 1; outline: 1px solid var(--gold); box-shadow: 0 0 10px rgba(227, 180, 92, .5); }
-.seq-step img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .75; }
-.seq-step.ban img { filter: grayscale(1); }
-.seq-gap { width: 8px; flex: 0 0 8px; }
+/* Order of the draft: what is coming and whose turn it is. Who was taken is shown by the pick and
+   ban rows above, so no portraits here — cropped hero art was what made this strip unreadable. */
+.order-strip { display: flex; gap: 5px; margin-top: 10px; }
+.og { display: flex; gap: 2px; align-items: flex-end; padding: 3px 4px; background: rgba(255, 255, 255, .04); border-radius: 3px; }
+.ostep { display: block; box-sizing: content-box; width: 7px; height: 13px; padding: 5px 2px; background-clip: content-box; border-radius: 1px; opacity: .45; transition: opacity .2s; }
+.ostep.pick { height: 19px; }
+.ostep.radiant { background: var(--radiant); }
+.ostep.dire { background: var(--dire); }
+.ostep.done { opacity: 1; }
+.ostep.current { opacity: 1; outline: 1px solid var(--gold); box-shadow: 0 0 9px rgba(227, 180, 92, .8); }
+.order-note { margin-top: 5px; font-family: var(--head); font-size: 12px; letter-spacing: .06em; color: var(--muted); text-align: center; }
+.order-note .r { color: var(--radiant-2); }
+.order-note .d { color: var(--dire-2); }
+.fp-badge { font-family: var(--head); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); border: 1px solid rgba(227, 180, 92, .45); border-radius: 2px; padding: 0 5px; align-self: flex-start; }
+.team-side.dire .fp-badge { align-self: flex-end; }
 
 /* ---------- draft body ---------- */
 .draft-body { flex: 1; display: grid; grid-template-columns: 1fr 400px; min-height: 0; }
@@ -300,14 +309,15 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .attr-head { display: flex; align-items: center; gap: 6px; font-family: var(--head); letter-spacing: .15em; text-transform: uppercase; font-size: 13px; margin-bottom: 6px; }
 .attr-head img { width: 20px; height: 20px; }
 .attr-head.a0 { color: var(--str); } .attr-head.a1 { color: var(--agi); } .attr-head.a2 { color: var(--int); } .attr-head.a3 { color: var(--uni); }
-.attr-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)); gap: 3px; }
+.attr-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
 .hcell {
-  position: relative; aspect-ratio: 7 / 9; border-radius: 2px; overflow: hidden; cursor: pointer;
+  position: relative; aspect-ratio: 235 / 272; border-radius: 3px; overflow: hidden; cursor: pointer;
   background: #0f131a; border: 1px solid transparent;
   transition: transform .12s, box-shadow .12s, filter .2s;
 }
-.hcell img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; display: block; }
-.hcell:hover { transform: scale(1.12); z-index: 3; box-shadow: 0 6px 18px rgba(0, 0, 0, .8), 0 0 0 1px #fff8; }
+.hcell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hcell .hname { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 3px 2px; font-size: 11px; line-height: 1.1; text-align: center; background: linear-gradient(transparent, rgba(0, 0, 0, .92)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hcell:hover { transform: scale(1.08); z-index: 3; box-shadow: 0 6px 18px rgba(0, 0, 0, .8), 0 0 0 1px #fff8; }
 .hcell.sel { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold), 0 0 16px rgba(227, 180, 92, .5); z-index: 2; }
 .hcell.dim { filter: grayscale(.9) brightness(.35); }
 .hcell.used { filter: grayscale(1) brightness(.28); cursor: default; }
@@ -324,6 +334,7 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .draft-chat { height: 118px; margin: 8px; flex: none; }
 
 .hp-hero { position: relative; height: 210px; overflow: hidden; background: radial-gradient(circle at 50% 70%, #2a3342, #0e1218 70%); }
+.hp-bg { position: absolute; inset: 0; background-size: cover; background-position: 50% 12%; filter: blur(16px) brightness(.45) saturate(.9); }
 .hp-hero video, .hp-hero img.render { position: absolute; left: 50%; top: 0; height: 125%; transform: translateX(-50%); }
 .hp-hero::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 50%, #121720 100%); }
 .hp-title { position: absolute; left: 14px; bottom: 10px; z-index: 2; }
@@ -563,8 +574,8 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
   .team-meta { min-width: 84px; }
   .team-name { font-size: 15px; }
   .reserve { font-size: 13px; }
-  .bans-row { grid-template-columns: 1fr; }
-  .bans[data-bans="dire"] { justify-content: flex-start; }
+  .team-side.dire .bans, .team-side.dire .team-stack { align-items: flex-start; justify-content: flex-start; }
+  .order-strip { flex-wrap: wrap; justify-content: center; }
   .draft-body { grid-template-columns: 1fr; }
   .side-panel { border-left: 0; border-top: 1px solid var(--line); }
   .hero-grid { overflow: visible; }
