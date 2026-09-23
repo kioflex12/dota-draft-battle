@@ -22,6 +22,17 @@ const STATIC = [['/shared/', path.join(ROOT, 'shared')], ['/data/', path.join(RO
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   let p = decodeURIComponent(url.pathname);
+  // Ссылка вида /room/КОД ведёт в комнату. Отдавать по этому адресу саму страницу нельзя:
+  // относительные ссылки на скрипты и стили уехали бы в /room/js/..., поэтому переадресация.
+  const roomLink = p.match(/^\/room\/([A-Za-z0-9]{5})\/?$/);
+  if (roomLink) {
+    // Остальные параметры адреса переносим как есть: иначе теряются режимы вроде ?p2p.
+    const q = new URLSearchParams(url.search);
+    q.set('room', roomLink[1].toUpperCase());
+    res.writeHead(302, { Location: '/?' + q.toString() });
+    res.end();
+    return;
+  }
   if (p === '/') p = '/index.html';
   for (const [prefix, dir] of STATIC) {
     if (!p.startsWith(prefix)) continue;

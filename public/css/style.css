@@ -426,6 +426,9 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .sec-title { font-family: var(--head); letter-spacing: .15em; text-transform: uppercase; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
 
 /* ---------- tooltip / toast / modal ---------- */
+.banner { position: fixed; left: 50%; top: 0; transform: translateX(-50%); z-index: 60; max-width: min(720px, 94vw); padding: 8px 18px; border: 1px solid var(--bad); border-top: 0; border-radius: 0 0 6px 6px; background: #2a1512; color: #ffd9d2; font-size: 14px; text-align: center; box-shadow: 0 6px 20px rgba(0, 0, 0, .6); }
+.banner[hidden] { display: none; }
+
 .tooltip { position: fixed; z-index: 100; pointer-events: none; max-width: 340px; background: #0b0e13f2; border: 1px solid var(--line2); border-radius: 4px; padding: 8px 10px; font-size: 12.5px; box-shadow: 0 10px 30px #000a; }
 .tooltip .tt-h { font-family: var(--head); font-size: 16px; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 2px; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #2a1512; border: 1px solid var(--dire); padding: 10px 18px; border-radius: 4px; z-index: 120; }

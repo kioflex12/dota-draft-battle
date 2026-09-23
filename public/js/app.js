@@ -72,7 +72,7 @@ async function boot() {
   bindDraft();
   bindTooltip(document.body);
   $('#loading').classList.add('hidden');
-  const code = new URLSearchParams(location.search).get('room');
+  const code = codeFromLocation();
   if (code && /^[A-Z0-9]{5}$/i.test(code)) S.pendingJoin = code.toUpperCase();
   connect();
   show('menu');
@@ -88,7 +88,17 @@ function show(name) {
 
 // ---------------- network ----------------
 
-const roomUrl = code => `${location.origin}${location.pathname}?room=${code}`;
+// Комнату открывают и как ?room=КОД, и как /room/КОД (второй адрес умеет только свой сервер —
+// на GitHub Pages статика раздаётся без маршрутов).
+const ROOM_PATH = /\/room\/([A-Za-z0-9]{5})\/?$/;
+const basePath = location.pathname.replace(ROOM_PATH, '/');
+const roomUrl = code => `${location.origin}${basePath}?room=${code}`;
+const codeFromLocation = () => {
+  const q = new URLSearchParams(location.search).get('room');
+  if (q) return q;
+  const m = location.pathname.match(ROOM_PATH);
+  return m ? m[1] : null;
+};
 
 function connect() {
   S.net = new Net({
@@ -116,21 +126,30 @@ function onMessage(msg) {
     S.room = msg.room;
     S.you = msg.you;
     S.clockOffset = msg.room.serverNow - Date.now();
-    if (new URLSearchParams(location.search).get('room') !== S.room.code) history.replaceState(null, '', '?room=' + S.room.code);
+    if (codeFromLocation() !== S.room.code) history.replaceState(null, '', basePath + '?room=' + S.room.code);
     renderRoom(prev);
   } else if (msg.t === 'error') {
     toast(msg.error);
-    if (msg.error === 'Комната не найдена') history.replaceState(null, '', location.pathname);
+    if (msg.error.startsWith('Комната не найдена')) history.replaceState(null, '', basePath);
   } else if (msg.t === 'left') {
     S.room = null;
     S.chatLast = null;
     S.resultView = null;
-    history.replaceState(null, '', location.pathname);
+    history.replaceState(null, '', basePath);
     show('menu');
   } else if (msg.t === 'hover') {
     showHover(msg.team, msg.hero);
   } else if (msg.t === 'disconnected') {
     if (S.room) toast('Соединение потеряно, переподключение…');
+  } else if (msg.t === 'reconnected') {
+    toast('Соединение восстановлено', true);
+    setBanner(null);
+  } else if (msg.t === 'joinRetry') {
+    toast(`Комната не отвечает, пробуем ещё раз (${msg.attempt} из 2)…`);
+  } else if (msg.t === 'hostState') {
+    // Комната живёт, пока хост зарегистрирован на сигнальном сервере. Если регистрация слетела,
+    // друг увидит «комната не найдена» — хозяину комнаты надо об этом сказать, а не молчать.
+    setBanner(msg.online ? null : 'Связь с сервером комнат потеряна — друг сейчас не сможет войти. Восстанавливаем…');
   }
 }
 
@@ -143,6 +162,12 @@ function showHover(team, hero) {
   if (!el) { S.hoverHint = null; return; }
   el.classList.add(team === 'dire' ? 'hover-d' : 'hover-r');
   S.hoverHint = { el };
+}
+
+function setBanner(text) {
+  const el = $('#banner');
+  el.textContent = text || '';
+  el.hidden = !text;
 }
 
 function renderRoom(prev) {
@@ -436,6 +461,15 @@ function bindDraft() {
     applyGridFilter();
   });
   $('#touch-bar').addEventListener('click', e => { if (e.target.closest('[data-act]') && S.selected != null) lockIn(S.selected); });
+  // В режиме без сервера комнату держит вкладка её создателя: закрыл — игра у всех оборвалась.
+  addEventListener('beforeunload', e => {
+    const r = S.room;
+    if (S.net?.mode !== 'p2p' || S.net?.role !== 'host' || !r) return;
+    const others = (r.seats.radiant && r.seats.dire && !r.seats.dire.bot) || r.spectators.length;
+    if (!others) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
   document.addEventListener('visibilitychange', updateTitleFlash);
   $('#portraits-toggle').addEventListener('change', e => {
     S.portraits = e.target.checked;
