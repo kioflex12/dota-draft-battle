@@ -510,7 +510,11 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .phase-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .phase-card { background: #10151c; border: 1px solid var(--line); border-radius: 5px; padding: 12px; text-align: center; }
 .phase-card .pn { font-family: var(--head); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-size: 12px; }
-.phase-card .pv { font-family: var(--head); font-size: 30px; font-weight: 700; }
+.phase-card .pv { font-family: var(--head); font-size: 30px; font-weight: 700; display: flex; justify-content: center; align-items: baseline; gap: 4px; }
+.phase-card .pv .r { color: var(--radiant-2); opacity: .5; }
+.phase-card .pv .d { color: var(--dire-2); opacity: .5; }
+.phase-card .pv .lead { opacity: 1; }
+.phase-card .pv .sep { color: var(--dim); font-size: 20px; }
 .phase-card .pt { font-size: 12px; color: var(--muted); }
 .spikes { display: grid; gap: 4px; }
 .spike-row { display: grid; grid-template-columns: 62px 1fr 1fr; gap: 8px; align-items: center; font-size: 12px; }

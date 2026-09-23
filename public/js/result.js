@@ -125,7 +125,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
         <span>Контрпики: ${l.parts.counters > 0 ? '+' : ''}${l.parts.counters}</span>
         <span>Дальность атаки/контроль: ${l.parts.heur > 0 ? '+' : ''}${l.parts.heur}</span>
       </div>
-    </div>`).join('') + `<div class="muted small">Сила героев на линии и личные встречи — по ${engine.meta.proMatches.toLocaleString('ru')} про-матчам с ${engine.meta.proSince}; контрпики — по ${engine.meta.pubMatches.toLocaleString('ru')} публичным матчам Divine+ патча ${engine.meta.patch}.</div>`;
+    </div>`).join('') + `<div class="muted small">Расклад на линиях считается по про-матчам текущего патча, контрпики — по публичным матчам высоких рангов.</div>`;
 
   const pairSrc = (p, first) => {
     const parts = [];
@@ -156,7 +156,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
             return `<td style="${cellColor(v)}" data-tip="<div class='tt-h'>${esc(H(a).name)} vs ${esc(H(b).name)}</div>${v >= 0 ? esc(H(a).name) : esc(H(b).name)} получает ${Math.abs(v).toFixed(1)}% к шансу победы в этой паре<br><span class='muted'>${pairSrc(c, H(a).name)}</span>">${fmtPct(v)}</td>`;
           }).join('')}</tr>`).join('')}
         </table></div>
-        <div class="matrix-legend">Зелёный — герой Сил Света переигрывает героя Сил Тьмы, красный — наоборот. Про-встречи весят больше публичных; наведите на ячейку, чтобы увидеть выборку.</div>
+        <div class="matrix-legend">Зелёный — герой Сил Света переигрывает героя Сил Тьмы, красный — наоборот. Наведите на ячейку, чтобы увидеть, на чём основана оценка.</div>
       </div>
       <div class="panel">
         <h4>Матрица синергий <span class="seg" id="syn-seg"><button data-syn="radiant" class="${synSide === 'radiant' ? 'on' : ''}">Силы Света</button><button data-syn="dire" class="${synSide === 'dire' ? 'on' : ''}">Силы Тьмы</button></span></h4>
@@ -203,9 +203,11 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
 
   const phasesTab = () => {
     const card = (label, range, p) => {
-      const r = p * 100;
-      const side = r >= 50 ? 'radiant' : 'dire';
-      return `<div class="phase-card"><div class="pn">${label}</div><div class="pv" style="color:${side === 'radiant' ? 'var(--radiant-2)' : 'var(--dire-2)'}">${Math.round(Math.max(r, 100 - r))}%</div><div class="pt">${range} · ${TEAM_NAME[side]}</div></div>`;
+      const r = Math.round(p * 100);
+      const lead = r >= 50 ? 'radiant' : 'dire';
+      return `<div class="phase-card"><div class="pn">${label}</div>
+        <div class="pv"><span class="r ${lead === 'radiant' ? 'lead' : ''}">${r}%</span><span class="sep">:</span><span class="d ${lead === 'dire' ? 'lead' : ''}">${100 - r}%</span></div>
+        <div class="pt">${range} · Свет : Тьма</div></div>`;
     };
     const spikes = side => {
       const list = A.spikes[side];
@@ -227,7 +229,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
         <div class="panel"><h4>Пики силы · Силы Света</h4>${spikes('radiant')}</div>
         <div class="panel"><h4>Пики силы · Силы Тьмы</h4>${spikes('dire')}</div>
       </div>
-      <div class="muted small">Выше средней линии игра идёт в пользу Сил Света, ниже — в пользу Сил Тьмы. Кривая строится по винрейту героев в зависимости от длительности матча (Divine+, патч ${engine.meta.patch}).</div>`;
+      <div class="muted small">Выше средней линии игра идёт в пользу Сил Света, ниже — в пользу Сил Тьмы. Кривая показывает, чей состав лучше себя чувствует, если матч затягивается.</div>`;
   };
 
   const compTab = () => {
@@ -280,7 +282,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
           <div><div class="sec-title">Стоило забанить (самые сильные пики соперника)</div>${heroList(alts.shouldBan[side], x => `<b class="pos">${fmtPct(toPct(x.v))}%</b>`)}</div>
           <div><div class="sec-title">Остались в пуле и подошли бы этому драфту</div>${heroList(alts.pool[side], x => `<b class="pos">${fmtPct(toPct(x.v))}%</b>`)}</div>
         </div>
-      </div>`).join('') + `<div class="muted small">Альтернативы подбираются на ту же позицию, что занял реальный пик, и только из героев, доступных в тот момент. «Тогда» — насколько лучше выглядел бы пик по уже известным героям обеих команд, без знания будущих пиков; «по итогу» — изменение шанса победы в финальных составах с учётом линий и матчапов.</div>`;
+      </div>`).join('') + `<div class="muted small">Альтернатива подбирается на ту же позицию и только из героев, свободных в тот момент. «Тогда» — как пик выглядел по тому, что уже стояло на столе; «по итогу» — как он сказался бы на финальных составах.</div>`;
   };
 
   const orderTab = () => `
