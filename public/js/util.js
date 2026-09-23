@@ -55,8 +55,26 @@ export function bindTooltip(root) {
   root.addEventListener('mouseout', e => {
     if (e.target.closest('[data-tip]') && !e.relatedTarget?.closest?.('[data-tip]')) tip().classList.add('hidden');
   });
-  // Scrolling moves the page out from under the tooltip while the pointer stays put, so no
-  // mouseout ever fires and the hint hangs over unrelated content until the next hover.
+  // На тач-экране наведения не бывает, поэтому подписи к слотам банов и полосе очерёдности были
+  // недоступны вовсе. Тап по такому элементу показывает подпись на пару секунд. Карточки героев
+  // исключены: по ним тап выбирает героя, а сведения и так открываются в панели.
+  let touchTimer;
+  root.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch') return;
+    const el = e.target.closest('[data-tip]');
+    if (!el || el.closest('.hcell')) return;
+    const t = tip();
+    t.innerHTML = el.dataset.tip;
+    t.classList.remove('hidden');
+    const r = el.getBoundingClientRect();
+    t.style.left = Math.max(8, Math.min(r.left, window.innerWidth - t.offsetWidth - 8)) + 'px';
+    t.style.top = (r.top > t.offsetHeight + 12 ? r.top - t.offsetHeight - 8 : r.bottom + 8) + 'px';
+    clearTimeout(touchTimer);
+    touchTimer = setTimeout(() => t.classList.add('hidden'), 2600);
+  }, { passive: true });
+
+  // Прокрутка уводит страницу из-под подсказки, а курсор остаётся на месте: mouseout не наступает,
+  // и подсказка висит над чужим содержимым до следующего наведения.
   const hide = () => tip().classList.add('hidden');
   addEventListener('scroll', hide, { capture: true, passive: true });
   addEventListener('wheel', hide, { passive: true });
