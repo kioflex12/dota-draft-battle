@@ -205,7 +205,10 @@ export class RoomManager {
     if (!t) return;
     const seat = room.seats[t.team];
     if (!seat || seat.bot || seat.client) { room.abandonedSince = null; return; }
-    if (room.abandonedStep !== t.index) { room.abandonedStep = t.index; room.abandonedSince = now; return; }
+    // Отсчёт взводится заново и когда сменился ход, и когда игрок успел вернуться и пропасть
+    // опять: иначе повторный обрыв на том же ходу сравнивал бы время с обнулённой меткой и
+    // ход делался бы мгновенно — ровно в случае моргающей связи, ради которого всё и задумано.
+    if (!room.abandonedSince || room.abandonedStep !== t.index) { room.abandonedStep = t.index; room.abandonedSince = now; return; }
     if (now - room.abandonedSince < 90_000) return;
     room.abandonedSince = now;
     const hero = this.engine.botChoice(room.draft, t.team, t.type, 'normal');
