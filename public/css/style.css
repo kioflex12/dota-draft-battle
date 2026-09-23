@@ -294,7 +294,8 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 
 /* ---------- draft body ---------- */
 .draft-body { flex: 1; display: grid; grid-template-columns: 1fr 400px; min-height: 0; }
-.grid-wrap { display: flex; flex-direction: column; min-height: 0; padding: 10px 12px; gap: 8px; }
+.draft-body > * { min-width: 0; }
+.grid-wrap { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: 10px 12px; gap: 8px; }
 .grid-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .search-box { position: relative; display: flex; align-items: center; width: 320px; max-width: 100%; }
 .search-box svg { position: absolute; left: 10px; color: var(--muted); pointer-events: none; }
@@ -319,11 +320,14 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 }
 .hcell img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .hcell .hname { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 3px 2px; font-size: 11px; line-height: 1.1; text-align: center; background: linear-gradient(transparent, rgba(0, 0, 0, .92)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hcell:hover { transform: scale(1.08); z-index: 3; box-shadow: 0 6px 18px rgba(0, 0, 0, .8), 0 0 0 1px #fff8; }
+@media (hover: hover) {
+  .hcell:hover { transform: scale(1.08); z-index: 3; box-shadow: 0 6px 18px rgba(0, 0, 0, .8), 0 0 0 1px #fff8; }
+}
 .hcell.sel { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold), 0 0 16px rgba(227, 180, 92, .5); z-index: 2; }
 .hcell.dim { filter: grayscale(.9) brightness(.35); }
 .hcell.used { filter: grayscale(1) brightness(.28); cursor: default; }
 .hcell.used:hover { transform: none; box-shadow: none; }
+.touch-bar { display: none; }
 .hcell.banned::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top right, transparent calc(50% - 1.5px), var(--bad) 50%, transparent calc(50% + 1.5px)); }
 .hcell.picked-r { box-shadow: inset 0 -3px 0 var(--radiant); }
 .hcell.picked-d { box-shadow: inset 0 -3px 0 var(--dire); }
@@ -581,10 +585,30 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 @media (max-width: 860px) {
   .menu-grid { grid-template-columns: 1fr; }
   #screen-draft { height: auto; }
-  .draft-top { grid-template-columns: 1fr; }
-  .team-side, .team-side.dire { justify-content: center; }
-  .team-side.dire { flex-direction: row-reverse; }
-  .team-side.dire .team-meta { text-align: left; align-items: flex-start; }
+  /* Шапка должна оставить место сетке героев: часы сверху, команды двумя колонками под ними,
+     слоты мельче. Стопкой в одну колонку шапка занимала весь экран телефона целиком. */
+  .draft-top { grid-template-columns: 1fr 1fr; grid-template-areas: "clock clock" "rad dire"; gap: 8px; padding: 6px 8px 4px; }
+  .center-clock { grid-area: clock; min-width: 0; }
+  .team-side.radiant { grid-area: rad; }
+  .team-side.dire { grid-area: dire; }
+  .pick-slot { width: clamp(40px, 13vw, 56px); }
+  .ban-slot { width: clamp(24px, 8vw, 34px); }
+  .big-timer { font-size: 34px; }
+  .phase-name, .order-note { font-size: 11px; }
+  .turn-label { font-size: 13px; }
+  .captain, .reserve { font-size: 11px; }
+  .order-strip { margin-top: 6px; gap: 3px; }
+  .og { padding: 2px 3px; gap: 1px; }
+  .ostep { width: 6px; height: 11px; padding: 3px 1px; }
+  .ostep.pick { height: 16px; }
+  .team-side { flex-direction: column; align-items: center; justify-content: flex-start; }
+  /* У Тьмы порядок в разметке зеркальный (сначала слоты, потом имя) — на телефоне колонки
+     должны начинаться одинаково, с названия команды. */
+  .team-side.dire { flex-direction: column-reverse; align-items: center; justify-content: flex-end; }
+  .team-meta, .team-side.dire .team-meta { flex: none; align-items: center; text-align: center; }
+  .team-side.dire .fp-badge { align-self: center; }
+  .team-stack, .team-side.dire .team-stack { align-items: center; width: 100%; }
+  .picks, .bans, .team-side.dire .bans { flex-wrap: wrap; justify-content: center; }
   .center-clock { order: -1; }
   .team-meta { min-width: 84px; }
   .team-name { font-size: 15px; }
@@ -593,7 +617,19 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
   .order-strip { flex-wrap: wrap; justify-content: center; }
   .draft-body { grid-template-columns: 1fr; }
   .side-panel { border-left: 0; border-top: 1px solid var(--line); }
-  .hero-grid { overflow: visible; }
+  .hero-grid { overflow: visible; padding-bottom: 76px; }
+  /* Фильтры ролей в одну прокручиваемую строку — двумя рядами они отнимают место у сетки. */
+  .role-filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .role-filters::-webkit-scrollbar { display: none; }
+  .role-filters button { white-space: nowrap; }
+  .grid-tools { gap: 6px; }
+  .grid-wrap { padding: 8px 10px; gap: 6px; }
+  /* Pinned action bar: on a phone the panel with the button is below the entire grid. */
+  .touch-bar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; gap: 10px; align-items: center; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: linear-gradient(180deg, #151b24, #0b0f15); border-top: 1px solid var(--line2); box-shadow: 0 -8px 24px rgba(0, 0, 0, .6); }
+  .touch-bar[hidden] { display: none; }
+  .touch-bar img { width: 40px; height: 46px; object-fit: cover; border-radius: 3px; }
+  .touch-bar .tb-name { flex: 1; font-family: var(--head); font-size: 16px; letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .touch-bar .btn { padding: 12px 18px; font-size: 16px; }
   .res-teams, .two-col, .phase-cards { grid-template-columns: 1fr; }
   .contrib-row { grid-template-columns: 110px 1fr 56px; }
   .alt-row { grid-template-columns: 1fr; }

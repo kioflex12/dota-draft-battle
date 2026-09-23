@@ -411,6 +411,7 @@ function bindDraft() {
     $$('#role-filters button').forEach(x => x.classList.toggle('on', x.dataset.role === S.role));
     applyGridFilter();
   });
+  $('#touch-bar').addEventListener('click', e => { if (e.target.closest('[data-act]') && S.selected != null) lockIn(S.selected); });
   document.addEventListener('visibilitychange', updateTitleFlash);
   $('#portraits-toggle').addEventListener('change', e => {
     S.portraits = e.target.checked;
@@ -462,6 +463,7 @@ function selectHero(id) {
   $$('.hcell.sel').forEach(c => c.classList.remove('sel'));
   $(`.hcell[data-hero="${id}"]`)?.classList.add('sel');
   renderHeroPanelFor(id);
+  renderTouchBar();
   send({ t: 'hover', hero: id });
 }
 
@@ -478,9 +480,21 @@ function renderHeroPanelFor(id) {
 }
 
 function updateLockBar() {
+  renderTouchBar();
   if (S.selected == null) return;
   const bar = $('#hero-panel .lock-bar');
   if (bar) bar.innerHTML = lockButtonHtml(S.selected);
+}
+
+// On a phone the action button lives in the side panel, and that panel sits below the whole hero
+// grid — confirming a pick meant scrolling past every hero. This bar stays pinned to the bottom.
+function renderTouchBar() {
+  const bar = $('#touch-bar');
+  const id = S.selected;
+  if (id == null || S.room?.phase !== 'draft') { bar.hidden = true; return; }
+  const hero = S.byId.get(id);
+  bar.hidden = false;
+  bar.innerHTML = `<img src="${heroVert(hero.key)}" ${vertFallback(hero.key)} alt=""><div class="tb-name">${esc(hero.name)}</div>${lockButtonHtml(id)}`;
 }
 
 function lockButtonHtml(id) {
