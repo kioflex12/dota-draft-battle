@@ -31,6 +31,8 @@ const server = http.createServer((req, res) => {
       if (err || !st.isFile()) { res.writeHead(404); res.end('Not found'); return; }
       res.writeHead(200, {
         'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+        // Without a length the client cannot show download progress, and the data files are ~2 MB.
+        'Content-Length': st.size,
         'Cache-Control': prefix === '/data/' ? 'public, max-age=3600' : 'no-cache',
       });
       fs.createReadStream(file).pipe(res);

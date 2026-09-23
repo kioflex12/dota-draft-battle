@@ -1,4 +1,4 @@
-import { $, $$, esc, heroImg, heroVert, heroVertBg, vertFallback, heroRender, ATTR_ICON, ATTR_NAME, toast, bindTooltip, beep, store, fmtPct } from './util.js';
+import { $, $$, esc, heroImg, heroVert, heroVertBg, vertFallback, heroRender, ATTR_ICON, ATTR_NAME, toast, bindTooltip, beep, store, fmtPct, flashTitle } from './util.js';
 import { renderHeroPanel } from './heroPanel.js';
 import { renderResult } from './result.js';
 import { Net } from './net.js';
@@ -12,6 +12,7 @@ const S = {
   screen: null, selected: null, search: '', role: null,
   portraits: store('portraits') !== '0',
   resultView: null, lastStep: -1, lastTick: -1, pendingJoin: null, slotsKey: null,
+  chatLast: null, chatUnread: 0, hoverHint: null,
 };
 
 const token = store('token') || (() => { const t = Math.random().toString(36).slice(2) + Date.now().toString(36); store('token', t); return t; })();
@@ -23,8 +24,40 @@ const EMBLEM = {
 
 // ---------------- boot ----------------
 
+// Heroes and stats together weigh about two megabytes; on a phone that is seconds of silence
+// under a spinner, so the loading screen reports how much has arrived.
+async function loadJson(url, onMeta, onChunk) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${String(url).split('/').pop()}: ${res.status}`);
+  onMeta(Number(res.headers.get('content-length')) || 0);
+  if (!res.body) return res.json();
+  const reader = res.body.getReader();
+  const parts = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    onChunk(value.length);
+  }
+  return JSON.parse(await new Blob(parts).text());
+}
+
 async function boot() {
-  const [hd, st] = await Promise.all([fetch(new URL('../data/heroes.json', import.meta.url)).then(r => r.json()), fetch(new URL('../data/stats.json', import.meta.url)).then(r => r.json())]);
+  // A response served from cache carries no length, and then there is nothing to take a percentage
+  // of — in that case show how much has arrived instead.
+  const progress = { got: 0, total: 0 };
+  const note = $('#loading .load-note');
+  const onMeta = t => { progress.total += t; };
+  const onChunk = n => {
+    progress.got += n;
+    note.textContent = progress.total
+      ? `${Math.min(99, Math.round(progress.got / progress.total * 100))}%`
+      : `${(progress.got / 1048576).toFixed(1)} МБ`;
+  };
+  const [hd, st] = await Promise.all([
+    loadJson(new URL('../data/heroes.json', import.meta.url), onMeta, onChunk),
+    loadJson(new URL('../data/stats.json', import.meta.url), onMeta, onChunk),
+  ]);
   S.heroes = hd.heroes;
   S.byId = new Map(S.heroes.map(h => [h.id, h]));
   S.engine = createEngine(S.heroes, st);
@@ -90,12 +123,26 @@ function onMessage(msg) {
     if (msg.error === 'Комната не найдена') history.replaceState(null, '', location.pathname);
   } else if (msg.t === 'left') {
     S.room = null;
+    S.chatLast = null;
     S.resultView = null;
     history.replaceState(null, '', location.pathname);
     show('menu');
+  } else if (msg.t === 'hover') {
+    showHover(msg.team, msg.hero);
   } else if (msg.t === 'disconnected') {
     if (S.room) toast('Соединение потеряно, переподключение…');
   }
+}
+
+// Only spectators receive this: shared/room.js sends hover to teammates and watchers, never to the
+// opposing captain, so it cannot leak what a captain is about to take.
+function showHover(team, hero) {
+  if (S.you.team || S.screen !== 'draft') return;
+  if (S.hoverHint) S.hoverHint.el.classList.remove('hover-r', 'hover-d');
+  const el = $(`.hcell[data-hero="${hero}"]`);
+  if (!el) { S.hoverHint = null; return; }
+  el.classList.add(team === 'dire' ? 'hover-d' : 'hover-r');
+  S.hoverHint = { el };
 }
 
 function renderRoom(prev) {
@@ -191,6 +238,8 @@ function bindMenu() {
 
   $$('[data-chat]').forEach(box => {
     box.innerHTML = '<div class="chat-log"></div><input placeholder="Сообщение… (Enter)" maxlength="200">';
+    box.addEventListener('click', clearChatUnread);
+    box.querySelector('input').addEventListener('focus', clearChatUnread);
     box.querySelector('input').addEventListener('keydown', e => {
       if (e.key !== 'Enter') return;
       const v = e.target.value.trim();
@@ -275,15 +324,44 @@ function renderCoin(prev) {
   $('#coin-opts').innerHTML = opts.map(o => `<button class="btn ${o === 'first' || o === 'radiant' ? 'primary' : ''}" data-coin="${o}" ${mine ? '' : 'disabled'}>${COIN_TEXT[o][0]}<small>${COIN_TEXT[o][1]}</small></button>`).join('');
 }
 
+const chatLine = m => (m.sys
+  ? `<div class="sys">${esc(m.text)}</div>`
+  : `<div><span class="n-${m.team || 'spec'}">${esc(m.name)}:</span> ${esc(m.text)}</div>`);
+
+// Only new lines are appended: rebuilding the log on every pick threw away the reader's selection
+// and the scroll position mid-sentence.
 function renderChat() {
   const r = S.room;
-  $$('[data-chat] .chat-log').forEach(log => {
+  let from = 0;
+  if (S.chatLast) {
+    const i = r.chat.findLastIndex(m => m.at === S.chatLast.at && m.text === S.chatLast.text);
+    from = i < 0 ? -1 : i + 1;
+  }
+  const fresh = from < 0 ? r.chat : r.chat.slice(from);
+  if (!fresh.length && from >= 0) return;
+  S.chatLast = r.chat.length ? { at: r.chat[r.chat.length - 1].at, text: r.chat[r.chat.length - 1].text } : null;
+  for (const log of $$('[data-chat] .chat-log')) {
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;
-    log.innerHTML = r.chat.map(m => m.sys
-      ? `<div class="sys">${esc(m.text)}</div>`
-      : `<div><span class="n-${m.team || 'spec'}">${esc(m.name)}:</span> ${esc(m.text)}</div>`).join('');
+    if (from < 0) log.innerHTML = r.chat.map(chatLine).join('');
+    else log.insertAdjacentHTML('beforeend', fresh.map(chatLine).join(''));
     if (atBottom) log.scrollTop = log.scrollHeight;
-  });
+  }
+  const theirs = fresh.filter(m => !m.sys && m.name !== myName());
+  if (S.screen === 'draft' && theirs.length) markChatUnread(theirs.length);
+}
+
+// The chat sits under the hero panel during a draft, so a new line is easy to miss.
+function markChatUnread(n) {
+  const box = $('.draft-chat');
+  if (!box || document.activeElement === box.querySelector('input')) return;
+  S.chatUnread += n;
+  box.dataset.unread = S.chatUnread;
+}
+
+function clearChatUnread() {
+  S.chatUnread = 0;
+  const box = $('.draft-chat');
+  if (box) delete box.dataset.unread;
 }
 
 // ---------------- draft: grid, search ----------------
@@ -333,6 +411,7 @@ function bindDraft() {
     $$('#role-filters button').forEach(x => x.classList.toggle('on', x.dataset.role === S.role));
     applyGridFilter();
   });
+  document.addEventListener('visibilitychange', updateTitleFlash);
   $('#portraits-toggle').addEventListener('change', e => {
     S.portraits = e.target.checked;
     store('portraits', S.portraits ? '1' : '0');
@@ -526,6 +605,7 @@ function renderDraft() {
     if (myTurn()) beep(880, 0.12, 0.05);
     if (S.search) applyGridFilter();
   }
+  updateTitleFlash();
   updateLockBar();
 }
 
@@ -540,6 +620,8 @@ function renderOrderNote(d, turn) {
   for (let i = turn.index; i < SEQUENCE.length && SEQUENCE[i].phase === turn.phase; i++) left[teamOfStep(d, i)]++;
   note.innerHTML = `Осталось ${turn.type === 'ban' ? 'банов' : 'пиков'} в фазе: <b class="r">${left.radiant}</b> · <b class="d">${left.dire}</b>`;
 }
+
+const updateTitleFlash = () => flashTitle(document.hidden && S.room?.phase === 'draft' && myTurn() ? '● ВАШ ХОД — Битва драфтов' : null);
 
 function tick() {
   const r = S.room;

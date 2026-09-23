@@ -55,12 +55,19 @@ export function bindTooltip(root) {
   root.addEventListener('mouseout', e => {
     if (e.target.closest('[data-tip]') && !e.relatedTarget?.closest?.('[data-tip]')) tip().classList.add('hidden');
   });
+  // Scrolling moves the page out from under the tooltip while the pointer stays put, so no
+  // mouseout ever fires and the hint hangs over unrelated content until the next hover.
+  const hide = () => tip().classList.add('hidden');
+  addEventListener('scroll', hide, { capture: true, passive: true });
+  addEventListener('wheel', hide, { passive: true });
+  addEventListener('blur', hide);
 }
 
 let audio;
 export function beep(freq = 660, dur = 0.08, vol = 0.05) {
   try {
     audio ??= new AudioContext();
+    if (audio.state === 'suspended') audio.resume();
     const o = audio.createOscillator(), g = audio.createGain();
     o.frequency.value = freq;
     o.type = 'triangle';
@@ -70,6 +77,23 @@ export function beep(freq = 660, dur = 0.08, vol = 0.05) {
     o.start();
     o.stop(audio.currentTime + dur);
   } catch {}
+}
+
+// A background tab shows nothing when the turn changes, and the sound may be muted or missed.
+// Flashing the tab title is the one signal that survives both.
+let titleTimer, baseTitle;
+export function flashTitle(text) {
+  baseTitle ??= document.title;
+  if (!text) {
+    clearInterval(titleTimer);
+    titleTimer = null;
+    document.title = baseTitle;
+    return;
+  }
+  if (titleTimer) return;
+  let on = false;
+  document.title = text;
+  titleTimer = setInterval(() => { on = !on; document.title = on ? baseTitle : text; }, 1000);
 }
 
 export function store(key, value) {
