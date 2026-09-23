@@ -10,7 +10,6 @@ const TABS = [
 export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpenHero }) {
   const d = room.draft;
   const rad = d.picks.radiant, dire = d.picks.dire;
-  const alts = engine.alternatives(d);
   const H = id => engine.H.get(id);
   const img = id => heroImg(H(id).key);
   const myTeam = you.team && room.mode !== 'local' ? you.team : null;
@@ -20,9 +19,10 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
   // The engine guesses positions from pro data. The captain can restate them, and the whole
   // analysis — линии, штрафы за роль, состав — пересчитывается по заявленной раскладке.
   const layout = { radiant: null, dire: null };
-  let A, pR, pD, favored, margin, verdict, youLine;
+  let A, alts, pR, pD, favored, margin, verdict, youLine;
   const recalc = () => {
     A = engine.analyze(rad, dire, { posRadiant: layout.radiant, posDire: layout.dire });
+    alts = engine.alternatives(d, { posRadiant: layout.radiant, posDire: layout.dire });
     pR = A.prob * 100;
     pD = 100 - pR;
     favored = pR >= 50 ? 'radiant' : 'dire';

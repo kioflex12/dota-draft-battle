@@ -151,6 +151,11 @@ export function createEngine(heroList, stats) {
   }
   const posAdj = (id, pos) => posDetail(id, pos).pen;
 
+  // Позиции обычно угадываются по про-данным, но капитан знает настоящий план: передайте
+  // { posRadiant, posDire } — перестановку 0..4 по индексам команды — и разбор будет построен
+  // на ней, а не на догадке. Негодная раскладка молча игнорируется.
+  const validPos = (p, team) => Array.isArray(p) && p.length === team.length && new Set(p).size === team.length && p.every(v => Number.isInteger(v) && v >= 0 && v < 5);
+
   function assign(team) {
     const n = team.length;
     if (!n) return { pos: [], score: 0 };
@@ -329,11 +334,6 @@ export function createEngine(heroList, stats) {
       return { hero: h, pos, prob: d.prob, n: d.n, wrPos: d.wrPos, pen: d.pen, text };
     });
   }
-
-  // Positions are normally guessed from pro data, but the captain knows the real plan: pass
-  // { posRadiant, posDire } — a permutation of 0..4 per team index — and the whole analysis
-  // (lanes, position penalties, composition) is rebuilt on that layout instead of the guess.
-  const validPos = (p, team) => Array.isArray(p) && p.length === team.length && new Set(p).size === team.length && p.every(v => Number.isInteger(v) && v >= 0 && v < 5);
 
   function analyze(rad, dire, { posRadiant, posDire } = {}) {
     const ra = validPos(posRadiant, rad) ? { pos: posRadiant, score: 0 } : assign(rad);
@@ -597,14 +597,16 @@ export function createEngine(heroList, stats) {
 
   // Alternatives are judged by what was known at the moment of the pick (earlier picks only) and
   // must fit the role the actual hero ended up playing; hindsight against the final draft is shown separately.
-  function alternatives(draft) {
+  // Раскладку можно задать руками (см. analyze): альтернатива подбирается на ту позицию, которую
+  // герой занимает по заявленной раскладке, а не по догадке движка.
+  function alternatives(draft, { posRadiant, posDire } = {}) {
     const res = { radiant: [], dire: [] };
     const finalR = draft.picks.radiant, finalD = draft.picks.dire;
     const baseProb = sig(evaluate(finalR, finalD));
     const finalPos = {};
-    for (const team of [finalR, finalD]) {
-      const asg = assign(team);
-      team.forEach((h, i) => { finalPos[h] = asg.pos[i]; });
+    for (const [team, override] of [[finalR, posRadiant], [finalD, posDire]]) {
+      const pos = validPos(override, team) ? override : assign(team).pos;
+      team.forEach((h, i) => { finalPos[h] = pos[i]; });
     }
     const allPicked = new Set([...finalR, ...finalD]);
     const usedBefore = new Set();
