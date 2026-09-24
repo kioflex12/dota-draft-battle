@@ -1,7 +1,11 @@
 import { createDraft, currentTurn, applyAction, clock, other, isAvailable } from './draft.js';
 
 const ORDERS = ['random', 'radiant', 'dire', 'coin'];
+// Сколько даётся на расстановку линий. Если капитан завис или ушёл, комната не должна стоять
+// вечно: по истечении срока за него ставится раскладка по про-статистике.
+const LANES_TIME = 90_000;
 const DEFAULT_SETTINGS = { order: 'random', timers: true, randomBan: false, firstBanTime: 15, turnTime: 30, reserve: 130 };
+const TEAM_LABEL = { radiant: 'Силы Света', dire: 'Силы Тьмы' };
 const COIN_LABEL = { first: 'первый пик', second: 'второй пик', radiant: 'Силы Света', dire: 'Силы Тьмы' };
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const pickNum = (v, allowed, def) => (allowed.includes(Number(v)) ? Number(v) : def);
@@ -48,6 +52,7 @@ export class RoomManager {
     const room = {
       code: c, mode, difficulty: difficulty || 'normal', settings: sanitizeSettings(rest), coin: null,
       phase: 'lobby', seats: { radiant: null, dire: null }, clients: new Set(), draft: null,
+      layout: { radiant: null, dire: null }, lanesReady: [], lanesDeadline: 0,
       chat: [], rematch: new Set(), createdAt: Date.now(), botTimer: null, lastActivity: Date.now(),
     };
     const botSide = side === 'dire' ? 'radiant' : 'dire';
@@ -63,12 +68,25 @@ export class RoomManager {
       seats: Object.fromEntries(Object.entries(room.seats).map(([t, s]) => [t, s ? { name: s.name, bot: !!s.bot, online: s.bot || !!s.client } : null])),
       spectators: [...room.clients].filter(c => !c.team).map(c => c.name),
       draft: room.draft, chat: room.chat.slice(-50), rematch: [...room.rematch], serverNow: Date.now(),
+      // Чужая раскладка до показа результата скрыта: иначе линии расставляются не по своему
+      // плану, а в ответ на чужой.
+      layout: room.phase === 'done' ? room.layout : { radiant: null, dire: null },
+      lanesReady: room.lanesReady, lanesDeadline: room.lanesDeadline,
     };
   }
 
   broadcast(room) {
     const state = this.publicRoom(room);
-    for (const c of room.clients) this.send(c, { t: 'room', room: state, you: { team: c.team, id: c.id } });
+    // Свою раскладку игрок видит всегда — в том числе вернувшись после обрыва.
+    for (const c of room.clients) this.send(c, { t: 'room', room: state, you: { team: c.team, id: c.id, layout: this.ownLayout(room, c) } });
+  }
+
+  // Что показать этому клиенту как «его» раскладку. На одном экране играют за обе стороны, там
+  // видны обе.
+  ownLayout(room, client) {
+    if (room.mode === 'local') return { ...room.layout };
+    if (!client.team) return { radiant: null, dire: null };
+    return { [client.team]: room.layout[client.team] };
   }
 
   sys(room, text) {
@@ -77,6 +95,9 @@ export class RoomManager {
 
   startMatch(room) {
     room.rematch.clear();
+    room.layout = { radiant: null, dire: null };
+    room.lanesReady = [];
+    room.lanesDeadline = 0;
     // Новая партия — чистый лист: разговор о прошлом драфте к новому отношения не имеет, а
     // висел он до сих пор поверх новых сообщений.
     room.chat.length = 0;
@@ -150,11 +171,51 @@ export class RoomManager {
 
   afterAction(room) {
     room.lastActivity = Date.now();
-    if (room.draft.done) {
-      room.phase = 'done';
-      this.sys(room, 'Драфт завершён.');
-    } else this.scheduleBot(room);
+    if (room.draft.done) this.startLanes(room);
+    else this.scheduleBot(room);
     this.broadcast(room);
+  }
+
+  // Между драфтом и разбором — расстановка линий. Обе команды ставят её вслепую и только потом
+  // видят результат: раскладка, выбранная после ответа, подгоняется под ответ, а не под план.
+  startLanes(room) {
+    room.phase = 'lanes';
+    room.layout = { radiant: null, dire: null };
+    room.lanesReady = [];
+    room.lanesDeadline = Date.now() + LANES_TIME;
+    this.sys(room, 'Драфт завершён. Расставьте линии — разбор покажем, когда обе команды будут готовы.');
+    // За бота и за пустое место раскладку ставит движок, и ждать его не надо.
+    for (const team of ['radiant', 'dire']) if (!this.humanSide(room, team)) this.setLanes(room, team, this.autoLayout(room, team));
+    this.checkLanesDone(room);
+  }
+
+  // Сторона, за которую ставит линии живой человек. В игре на одном экране это обе стороны.
+  humanSide(room, team) {
+    if (room.mode === 'local') return true;
+    const seat = room.seats[team];
+    return !!seat && !seat.bot;
+  }
+
+  autoLayout(room, team) {
+    return this.engine.assign(room.draft.picks[team]).pos.slice();
+  }
+
+  validLayout(pos) {
+    return Array.isArray(pos) && pos.length === 5 && new Set(pos).size === 5
+      && pos.every(v => Number.isInteger(v) && v >= 0 && v < 5);
+  }
+
+  setLanes(room, team, pos) {
+    room.layout[team] = pos;
+    if (!room.lanesReady.includes(team)) room.lanesReady.push(team);
+  }
+
+  checkLanesDone(room) {
+    if (room.phase !== 'lanes') return false;
+    if (!['radiant', 'dire'].every(t => room.lanesReady.includes(t))) return false;
+    room.phase = 'done';
+    this.sys(room, 'Линии расставлены — вот разбор.');
+    return true;
   }
 
   scheduleBot(room) {
@@ -205,6 +266,16 @@ export class RoomManager {
           this.sys(room, t.type === 'pick' ? 'Время вышло — выбран случайный герой.' : hero != null ? 'Время вышло — забанен случайный герой.' : 'Время вышло — бан пропущен.');
           this.afterAction(room);
         }
+      }
+      // Расстановка линий не должна вешать комнату: ушедшему капитану ставим раскладку по
+      // про-статистике и показываем разбор.
+      if (room.phase === 'lanes' && now > room.lanesDeadline) {
+        for (const team of ['radiant', 'dire']) if (!room.lanesReady.includes(team)) {
+          this.setLanes(room, team, this.autoLayout(room, team));
+          this.sys(room, `${TEAM_LABEL[team]} не успели расставить линии — расставлено по про-статистике.`);
+        }
+        this.checkLanesDone(room);
+        this.broadcast(room);
       }
       const idle = now - room.lastActivity;
       if ((room.clients.size === 0 && idle > 10 * 60_000) || idle > 6 * 3600_000) {
@@ -373,6 +444,17 @@ export class RoomManager {
         const text = String(msg.text || '').trim().slice(0, 200);
         if (!text) return;
         room.chat.push({ name: client.name, team: client.team, text, at: Date.now() });
+        this.broadcast(room);
+        break;
+      }
+      // Раскладка линий. Своя команда — своя раскладка; на одном экране игрок ставит обе.
+      case 'lanes': {
+        if (!room || room.phase !== 'lanes' || !client.team) return;
+        const team = room.mode === 'local' ? (msg.team === 'dire' ? 'dire' : 'radiant') : client.team;
+        if (!this.validLayout(msg.pos)) { this.send(client, { t: 'error', error: 'Каждая позиция должна быть занята ровно одним героем' }); return; }
+        this.setLanes(room, team, msg.pos.slice());
+        room.lastActivity = Date.now();
+        this.checkLanesDone(room);
         this.broadcast(room);
         break;
       }

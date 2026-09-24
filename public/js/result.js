@@ -18,9 +18,10 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
   const myTeam = you.team && room.mode !== 'local' ? you.team : null;
   let tab = 'summary';
 
-  // The engine guesses positions from pro data. The captain can restate them, and the whole
-  // analysis — линии, штрафы за роль, состав — пересчитывается по заявленной раскладке.
-  const layout = { radiant: null, dire: null };
+  // Раскладку линий команды заявили до разбора, обе сразу и вслепую (экран «Расставьте линии»).
+  // Здесь она уже только показывается: менять её, увидев ответ, — значит подгонять план под
+  // оценку, а не играть по плану.
+  const layout = { radiant: room.layout?.radiant || null, dire: room.layout?.dire || null };
   let A, alts, pR, pD, favored, margin, rank, verdict, youLine, scaleNote;
   const recalc = () => {
     A = engine.analyze(rad, dire, { posRadiant: layout.radiant, posDire: layout.dire });
@@ -45,47 +46,23 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
   };
   recalc();
 
-  const posOf = side => A.positions[side].map(p => p.pos);
-  const setPos = (side, idx, want) => {
-    if (!canEdit(side)) return;
-    const cur = posOf(side);
-    const held = cur.indexOf(want);
-    const was = cur[idx];
-    cur[idx] = want;
-    if (held >= 0 && held !== idx) cur[held] = was;
-    layout[side] = cur;
-    recalc();
-    draw();
-  };
-
   const name = t => room.seats[t]?.name || TEAM_NAME[t];
-
-  // Раскладку правит только капитан своей команды: чужие позиции — не его дело. В игре на одном
-  // экране и у зрителя своей стороны нет, поэтому там доступны обе.
-  const canEdit = side => !myTeam || myTeam === side;
 
   const teamBlock = side => {
     const pos = A.positions[side];
     const order = pos.map((p, i) => ({ ...p, idx: i })).sort((a, b) => a.pos - b.pos);
-    const editable = canEdit(side);
     return `
       <div class="res-team ${side}">
-        <div class="th"><b>${TEAM_NAME[side]}</b><span class="muted">${esc(name(side))}</span>${editable && layout[side] ? `<button class="pos-reset" data-pos-auto="${side}">вернуть авто</button>` : ''}</div>
+        <div class="th"><b>${TEAM_NAME[side]}</b><span class="muted">${esc(name(side))}</span></div>
         <div class="team-heroes">
           ${order.map(p => `
             <div class="th-hero">
               <img src="${img(p.hero)}" data-open="${p.hero}" alt="">
               <div class="nm" data-open="${p.hero}">${esc(H(p.hero).name)}</div>
-              ${editable
-                ? `<select class="posn ${p.pen < 0 ? 'off' : ''}" data-pos-side="${side}" data-pos-idx="${p.idx}" title="Поставьте позицию, на которой герой играл на самом деле — разбор пересчитается">
-                ${POS_SHORT_ROLE.map((n, v) => `<option value="${v}" ${v === p.pos ? 'selected' : ''}>${v + 1} · ${n}</option>`).join('')}
-              </select>`
-                : `<div class="posn static ${p.pen < 0 ? 'off' : ''}">${p.pos + 1} · ${POS_SHORT_ROLE[p.pos]}</div>`}
+              <div class="posn static ${p.pen < 0 ? 'off' : p.pen > 0.01 ? 'flex' : ''}">${p.pos + 1} · ${POS_SHORT_ROLE[p.pos]}</div>
             </div>`).join('')}
         </div>
-        <div class="pos-hint muted small">${editable
-          ? 'Позиции и линии определены по про-статистике. Если играли иначе — поменяйте здесь, разбор пересчитается.'
-          : 'Позиции соперника определены по про-статистике. Менять можно только свою команду.'}</div>
+        <div class="pos-hint muted small">${layout[side] ? 'Раскладку заявила сама команда перед разбором.' : 'Раскладка по про-статистике: команда не успела заявить свою.'}</div>
       </div>`;
   };
 
@@ -502,15 +479,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
 
   const body = () => ({ summary: summaryTab, lanes: lanesTab, matchups: matchupsTab, phases: phasesTab, comp: compTab, alts: altsTab, order: orderTab })[tab]();
 
-  root.onchange = e => {
-    const sel = e.target.closest('[data-pos-side]');
-    if (sel) setPos(sel.dataset.posSide, Number(sel.dataset.posIdx), Number(sel.value));
-  };
-
   root.onclick = e => {
-    if (e.target.closest('[data-pos-side]')) return;
-    const auto = e.target.closest('[data-pos-auto]');
-    if (auto) { if (canEdit(auto.dataset.posAuto)) { layout[auto.dataset.posAuto] = null; recalc(); draw(); } return; }
     const t = e.target.closest('[data-rtab]');
     if (t) {
       tab = t.dataset.rtab;
@@ -527,5 +496,14 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
     if (a?.dataset.act === 'menu') onMenu();
   };
   draw();
-  return { update(newRoom) { room = newRoom; draw(); } };
+  return {
+    update(newRoom) {
+      room = newRoom;
+      // Раскладка приходит вместе с комнатой; пересчитываем только если она и вправду сменилась —
+      // полный пересчёт с альтернативами занимает пятую долю секунды.
+      const next = { radiant: newRoom.layout?.radiant || null, dire: newRoom.layout?.dire || null };
+      if (JSON.stringify(next) !== JSON.stringify(layout)) { Object.assign(layout, next); recalc(); }
+      draw();
+    },
+  };
 }

@@ -32,7 +32,7 @@ const PEER_ERROR = {
 const peerError = e => PEER_ERROR[e && e.type] || ('Ошибка сети: ' + ((e && (e.type || e.message)) || 'неизвестная'));
 
 // Что имеет смысл придержать до восстановления связи, а что протухает мгновенно.
-const QUEUED_KINDS = new Set(['action', 'chat', 'settings', 'start', 'swap', 'sit', 'coin', 'rematch']);
+const QUEUED_KINDS = new Set(['action', 'chat', 'settings', 'start', 'swap', 'sit', 'coin', 'lanes', 'rematch']);
 
 // Адрес сервера комнат: параметр ?server=, сохранённый выбор, файл config.json рядом со сборкой.
 // Пустое значение означает «сервера нет» — тогда остаётся связь напрямую между браузерами.

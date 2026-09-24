@@ -11,7 +11,7 @@ const S = {
   net: null, room: null, you: {}, clockOffset: 0,
   screen: null, selected: null, search: '', role: null,
   portraits: store('portraits') !== '0',
-  resultView: null, lastStep: -1, lastTick: -1, pendingJoin: null, slotsKey: null,
+  resultView: null, lastStep: -1, lastTick: -1, pendingJoin: null, slotsKey: null, lanePos: null,
   chatLast: null, chatRoom: null, chatUnread: 0, hoverHint: null,
   conn: { state: 'connecting', ms: null, lastPong: 0 }, lastJoin: null, version: null,
 };
@@ -377,6 +377,12 @@ function renderRoom(prev) {
     show('draft');
     return;
   }
+  if (r.phase === 'lanes') {
+    if (S.screen === 'draft' && prev?.phase === 'draft') { renderDraft(); beep(520, 0.25, 0.06); setTimeout(() => { if (S.room?.phase === 'lanes') { renderLanes(true); show('lanes'); } }, 1400); return; }
+    renderLanes(S.screen !== 'lanes');
+    show('lanes');
+    return;
+  }
   if (r.phase === 'done') {
     if (S.screen === 'draft' && prev?.phase === 'draft') {
       renderDraft();
@@ -386,6 +392,66 @@ function renderRoom(prev) {
       S.resultView.update(r);
     } else showResult();
   }
+}
+
+// Короткие подписи позиций: полное «Оффлейнер» в выпадающий список не помещается.
+const POS_PICK = ['Керри', 'Мид', 'Оффлейн', 'Роумер', 'Саппорт'];
+
+// ---------------- расстановка линий ----------------
+
+// Линии ставятся до разбора и обеими командами сразу. Иначе раскладку подгоняют под уже
+// известный ответ, а это не план на игру, а подгонка под оценку.
+function renderLanes(reset) {
+  const r = S.room, d = r.draft;
+  const sides = S.you.team && r.mode !== 'local' ? [S.you.team] : ['radiant', 'dire'];
+  const editable = S.you.team ? sides : [];
+  if (reset || !S.lanePos) {
+    S.lanePos = {};
+    for (const t of ['radiant', 'dire']) {
+      const own = S.you.layout?.[t];
+      S.lanePos[t] = own ? own.slice() : S.engine.assign(d.picks[t]).pos.slice();
+    }
+  }
+  const ready = t => r.lanesReady.includes(t);
+  $('#lanes-teams').innerHTML = (editable.length ? editable : ['radiant', 'dire']).map(side => `
+    <div class="lane-team ${side} ${ready(side) ? 'ready' : ''}">
+      <div class="lt-head"><b>${TEAM_NAME[side]}</b><span class="muted">${esc(r.seats[side]?.name || '')}</span></div>
+      ${d.picks[side].map((h, i) => {
+    const hero = S.byId.get(h);
+    return `<div class="lane-row">
+          <img src="${heroVert(hero.key)}" ${vertFallback(hero.key)} alt="">
+          <span class="lr-name">${esc(hero.name)}</span>
+          <select data-lane-side="${side}" data-lane-idx="${i}" ${ready(side) || !editable.includes(side) ? 'disabled' : ''}>
+            ${POS_PICK.map((n, v) => `<option value="${v}" ${v === S.lanePos[side][i] ? 'selected' : ''}>${v + 1} · ${n}</option>`).join('')}
+          </select>
+        </div>`;
+  }).join('')}
+    </div>`).join('');
+  const waiting = ['radiant', 'dire'].filter(t => !ready(t));
+  $('#lanes-wait').textContent = !editable.length
+    ? 'Вы смотрите со стороны — разбор появится, когда капитаны расставят линии.'
+    : waiting.length ? `Ждём: ${waiting.map(t => TEAM_NAME[t]).join(' и ')}` : 'Готово, открываем разбор…';
+  const done = editable.every(t => ready(t));
+  $('#lanes-ready').disabled = done || !editable.length;
+  $('#lanes-ready').textContent = done ? 'Отправлено' : 'Готово';
+  $('#lanes-auto').hidden = done || !editable.length;
+}
+
+// Позиции меняются местами: две одинаковые в команде невозможны, а «отдай свою» — обычный ход
+// мысли, когда раскладку правят.
+function setLanePos(side, idx, want) {
+  const cur = S.lanePos[side];
+  const held = cur.indexOf(want);
+  const was = cur[idx];
+  cur[idx] = want;
+  if (held >= 0 && held !== idx) cur[held] = was;
+  renderLanes(false);
+}
+
+function tickLanes() {
+  if (S.room?.phase !== 'lanes') return;
+  const left = Math.max(0, Math.round((S.room.lanesDeadline - Date.now() - S.clockOffset) / 1000));
+  $('#lanes-timer').textContent = left ? `Осталось ${left} с` : 'Время вышло';
 }
 
 function showResult() {
@@ -420,6 +486,18 @@ function bindMenu() {
   };
   $('#jf-retry').onclick = () => { $('#join-fail').hidden = true; if (S.lastJoin) joinRoom(S.lastJoin); };
   $('#jf-close').onclick = () => { $('#join-fail').hidden = true; };
+  $('#lanes-teams').addEventListener('change', e => {
+    const sel = e.target.closest('[data-lane-side]');
+    if (sel) setLanePos(sel.dataset.laneSide, Number(sel.dataset.laneIdx), Number(sel.value));
+  });
+  $('#lanes-ready').onclick = () => {
+    const sides = S.room.mode === 'local' ? ['radiant', 'dire'] : [S.you.team];
+    for (const t of sides) if (t) send({ t: 'lanes', team: t, pos: S.lanePos[t] });
+  };
+  $('#lanes-auto').onclick = () => {
+    for (const t of ['radiant', 'dire']) S.lanePos[t] = S.engine.assign(S.room.draft.picks[t]).pos.slice();
+    renderLanes(false);
+  };
   $('#joining-cancel').onclick = () => { S.lastJoin = null; if (S.net) { S.net.wantJoin = null; S.net.wantRoom = null; } show('menu'); };
   $('#btn-create').addEventListener('click', () => { $('#join-fail').hidden = true; });
   $('#btn-nettest').onclick = e => { e.target.disabled = true; runNetTest().finally(() => { e.target.disabled = false; }); };
@@ -972,6 +1050,7 @@ const updateTitleFlash = () => flashTitle(document.hidden && S.room?.phase === '
 
 function tick() {
   const r = S.room;
+  if (r?.phase === 'lanes') { tickLanes(); return; }
   if (!r || r.phase !== 'draft' || S.screen !== 'draft') return;
   const d = r.draft, t = currentTurn(d);
   if (!t) return;

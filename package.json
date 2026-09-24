@@ -8,7 +8,7 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "build-data": "node tools/build-data.mjs",
-    "check": "node tools/analysis-baseline.mjs && node tools/room-abandon-check.mjs"
+    "check": "node tools/analysis-baseline.mjs && node tools/room-abandon-check.mjs && node tools/lanes-check.mjs"
   },
   "engines": { "node": ">=20" },
   "dependencies": { "ws": "^8.18.0" }
