@@ -124,6 +124,14 @@ function connect() {
   });
 }
 
+// Тот же список, что и у самой игры: проверка должна мерить ровно то, чем играют.
+const ICE_TEST = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+];
+
 const send = msg => S.net?.send(msg);
 const joinRoom = code => {
   S.lastJoin = code;
@@ -240,6 +248,62 @@ function watchConnLiveness() {
   }, 2000);
 }
 
+// Проверка связи: показывает, что именно доступно с этой машины. Без неё разговор об обрывах
+// упирается в догадки — «у меня не работает» против «а у меня работает».
+async function runNetTest() {
+  const box = $('#nettest');
+  box.hidden = false;
+  const lines = [];
+  const draw = () => { box.innerHTML = lines.map(l => `<div class="nt ${l.k}">${l.t}</div>`).join(''); };
+  const put = (k, t) => { lines.push({ k, t }); draw(); };
+  lines.length = 0;
+  put('wait', 'Проверяем…');
+
+  // 1. Сервер комнат, если он настроен
+  const server = S.net?.serverUrl;
+  lines.length = 0;
+  if (server) put(S.net.mode === 'ws' ? 'ok' : 'bad', `Сервер комнат: ${S.net.mode === 'ws' ? 'подключён' : 'не отвечает'}`);
+  else put('warn', 'Сервер комнат не настроен — игра связывает браузеры напрямую');
+
+  // 2. Сервер, который сводит игроков
+  put('wait', 'Сервер поиска игроков: проверяем…');
+  let Peer = null;
+  try { Peer = await S.net.peerLib(); } catch {}
+  const sig = await new Promise(res => {
+    try {
+      if (!Peer) return res('не удалось загрузить библиотеку соединения');
+      const p = new Peer();
+      const done = t => { try { p.destroy(); } catch {} res(t); };
+      const timer = setTimeout(() => done('не ответил за 12 секунд'), 12000);
+      p.on('open', () => { clearTimeout(timer); done('ok'); });
+      p.on('error', e => { clearTimeout(timer); done(e.type || e.message); });
+    } catch (e) { res(e.message); }
+  });
+  lines.pop();
+  put(sig === 'ok' ? 'ok' : 'bad', `Сервер поиска игроков: ${sig === 'ok' ? 'доступен' : 'недоступен (' + sig + ')'}`);
+
+  // 3. Виден ли внешний адрес и есть ли ретранслятор
+  put('wait', 'Обход NAT: проверяем…');
+  const ice = await new Promise(res => {
+    const kinds = {};
+    const pc = new RTCPeerConnection({ iceServers: ICE_TEST });
+    pc.onicecandidate = e => {
+      if (!e.candidate) return;
+      const m = /(?: typ )(\w+)/.exec(e.candidate.candidate);
+      if (m) kinds[m[1]] = (kinds[m[1]] || 0) + 1;
+    };
+    pc.createDataChannel('t');
+    pc.createOffer().then(o => pc.setLocalDescription(o));
+    setTimeout(() => { try { pc.close(); } catch {} res(kinds); }, 9000);
+  });
+  lines.pop();
+  put(ice.srflx ? 'ok' : 'bad', `Внешний адрес виден: ${ice.srflx ? 'да' : 'нет'}`);
+  put(ice.relay ? 'ok' : 'warn', ice.relay
+    ? 'Ретранслятор доступен — соединение встанет даже через строгий NAT'
+    : 'Ретранслятора нет. Если прямое соединение между вашими сетями не проходит, игра не соединится — нужен свой сервер комнат');
+  draw();
+}
+
 function showJoinFail(reason) {
   const el = $('#join-fail');
   el.querySelector('.jf-text').innerHTML = `Не удалось войти в комнату <b>${esc(S.lastJoin)}</b>. ${esc(reason)}.<br>
@@ -333,6 +397,7 @@ function bindMenu() {
   };
   $('#jf-retry').onclick = () => { $('#join-fail').hidden = true; if (S.lastJoin) joinRoom(S.lastJoin); };
   $('#jf-close').onclick = () => { $('#join-fail').hidden = true; };
+  $('#btn-nettest').onclick = e => { e.target.disabled = true; runNetTest().finally(() => { e.target.disabled = false; }); };
   $('#join-code').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-join').click(); });
   $('#btn-bot').onclick = () => {
     const side = $('#bot-side').value;

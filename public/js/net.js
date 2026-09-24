@@ -123,6 +123,9 @@ export class Net {
     };
   }
 
+  // Проверке связи нужна та же библиотека, что и игре, а грузится она лениво.
+  peerLib() { return loadPeerJs(); }
+
   startP2P() {
     this.mode = 'p2p';
     this.onOpen();
