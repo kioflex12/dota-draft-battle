@@ -128,7 +128,7 @@ export class Net {
   // восстановления связи, а если не дождался — об этом говорят вслух.
   queue(msg) {
     this.pending = (this.pending || []).filter(x => Date.now() - x.at < 20_000);
-    this.pending.push({ msg, at: Date.now() });
+    this.pending.push({ msg: { ...msg, queued: true }, at: Date.now() });
     if (this.pending.length > 20) this.pending.shift();
     this.onMessage({ t: 'queued', kind: msg.t });
     clearTimeout(this.pendingTimer);
@@ -163,6 +163,12 @@ export class Net {
   send(msg) {
     // Приветствие и выход осмысленны только сейчас, их копить незачем.
     if (QUEUED_KINDS.has(msg.t) && !this.canDeliver()) { this.queue(msg); return; }
+    // Номер шага защищает ход, пролежавший в очереди: он мог доехать, когда очередь уже другая.
+    // На обычном клике его быть не должно — иначе клиент, чья картинка отстала на один ход,
+    // получает отказ «этот ход уже сделан» вместо хода, и на моргающей связи это происходит
+    // постоянно.
+    if (msg.step != null && !msg.queued) { msg = { ...msg }; delete msg.step; }
+    if (msg.queued) { msg = { ...msg }; delete msg.queued; }
     if (this.mode === 'ws') { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(msg)); return; }
     if (msg.t === 'hello') this.hello = msg;
     if (this.role === 'host') { this.manager.handle(this.local, msg); return; }
@@ -277,9 +283,13 @@ export class Net {
     const peer = this.peer;
     if (this.role !== 'host' || !peer || peer.destroyed) return;
     if (peer.disconnected) {
-      this.reportHost(false);
       try { peer.reconnect(); } catch {}
+      // Разрыв на несколько секунд переживается молча: жаловаться стоит, только если
+      // восстановиться не удалось и за вторую проверку подряд.
+      this.hostMiss = (this.hostMiss || 0) + 1;
+      if (this.hostMiss >= 2) this.reportHost(false);
     } else {
+      this.hostMiss = 0;
       this.reportHost(true);
     }
   }
