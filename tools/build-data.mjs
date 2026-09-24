@@ -455,7 +455,7 @@ async function main() {
       proSince: new Date(PRO_SINCE * 1000).toISOString().slice(0, 10),
       durBins: DUR_BINS,
     },
-    heroes: heroStats, syn, vs, laneVs, proSyn, proVs,
+    heroes: heroStats, syn, vs, laneVs, laneWith, proSyn, proVs,
   };
   await fs.writeFile(path.join(DATA, 'stats.json'), JSON.stringify(stats));
   console.log('done');
