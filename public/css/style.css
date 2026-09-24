@@ -124,6 +124,11 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .logo-sub b { color: var(--gold); }
 .field { display: grid; gap: 6px; max-width: 320px; margin: 0 auto; width: 100%; text-align: center; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .12em; }
 .field input { text-align: center; font-size: 16px; }
+.join-fail { display: grid; gap: 10px; margin-bottom: 14px; padding: 12px 16px; border: 1px solid rgba(239, 100, 80, .55); border-radius: 6px; background: rgba(42, 21, 18, .75); line-height: 1.45; }
+.join-fail[hidden] { display: none; }
+.join-fail .jf-actions { display: flex; gap: 8px; }
+.join-fail .btn { padding: 8px 14px; }
+
 .menu-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .card {
   background: linear-gradient(180deg, rgba(27, 33, 43, .92), rgba(16, 20, 27, .92));
@@ -741,7 +746,12 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
   .alt-opts { grid-template-columns: 1fr; }
 }
 @media (max-width: 860px) {
-  .menu-grid { grid-template-columns: 1fr; }
+  .join-fail { display: grid; gap: 10px; margin-bottom: 14px; padding: 12px 16px; border: 1px solid rgba(239, 100, 80, .55); border-radius: 6px; background: rgba(42, 21, 18, .75); line-height: 1.45; }
+.join-fail[hidden] { display: none; }
+.join-fail .jf-actions { display: flex; gap: 8px; }
+.join-fail .btn { padding: 8px 14px; }
+
+.menu-grid { grid-template-columns: 1fr; }
   #screen-draft { height: auto; }
   /* Шапка должна оставить место сетке героев: часы сверху, команды двумя колонками под ними,
      слоты мельче. Стопкой в одну колонку шапка занимала весь экран телефона целиком. */

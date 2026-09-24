@@ -28,6 +28,7 @@ jobs:
           cp -r public/. dist/
           cp -r shared dist/shared
           cp -r data dist/data
+          printf '{"sha":"%s","built":"%s"}' "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/version.json
           touch dist/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

@@ -13,7 +13,7 @@ const S = {
   portraits: store('portraits') !== '0',
   resultView: null, lastStep: -1, lastTick: -1, pendingJoin: null, slotsKey: null,
   chatLast: null, chatUnread: 0, hoverHint: null,
-  conn: { state: 'connecting', ms: null, lastPong: 0 },
+  conn: { state: 'connecting', ms: null, lastPong: 0 }, lastJoin: null, version: null,
 };
 
 const token = store('token') || (() => { const t = Math.random().toString(36).slice(2) + Date.now().toString(36); store('token', t); return t; })();
@@ -78,6 +78,7 @@ async function boot() {
   connect();
   setConn('connecting');
   watchConnLiveness();
+  watchVersion();
   show('menu');
   setInterval(tick, 200);
 }
@@ -118,12 +119,18 @@ function connect() {
       setConn('ok');
       send({ t: 'hello', name: myName(), token });
       const code = S.pendingJoin || S.room?.code;
-      if (code) { send({ t: 'join', code }); S.pendingJoin = null; }
+      if (code) { S.lastJoin = code; send({ t: 'join', code }); S.pendingJoin = null; }
     },
   });
 }
 
 const send = msg => S.net?.send(msg);
+const joinRoom = code => {
+  S.lastJoin = code;
+  $('#join-fail').hidden = true;
+  send({ t: 'hello', name: myName(), token });
+  send({ t: 'join', code });
+};
 const myName = () => ($('#name-input').value.trim() || 'Капитан').slice(0, 20);
 
 function onMessage(msg) {
@@ -136,6 +143,9 @@ function onMessage(msg) {
     renderRoom(prev);
   } else if (msg.t === 'error') {
     toast(msg.error);
+    // Тост живёт пару секунд, а неудачный вход надо увидеть и переспросить: оставляем панель
+    // с причиной и кнопкой повтора, иначе человек остаётся в меню без всякого объяснения.
+    if (/Комната не найдена|Связь с комнатой потеряна|не отвечает/.test(msg.error) && S.lastJoin) showJoinFail(msg.error);
     if (msg.error.startsWith('Комната не найдена')) history.replaceState(null, '', basePath);
   } else if (msg.t === 'left') {
     S.room = null;
@@ -230,6 +240,35 @@ function watchConnLiveness() {
   }, 2000);
 }
 
+function showJoinFail(reason) {
+  const el = $('#join-fail');
+  el.querySelector('.jf-text').innerHTML = `Не удалось войти в комнату <b>${esc(S.lastJoin)}</b>. ${esc(reason)}.<br>
+    Комнату держит вкладка того, кто её создал: попросите его обновить страницу и прислать ссылку заново.`;
+  el.hidden = false;
+}
+
+// Открытая вкладка не перечитывает файлы сама, поэтому у человека, который не перезагружал
+// страницу, может работать давняя версия — со старыми ошибками. Сборка кладёт рядом отпечаток
+// версии, а страница время от времени сверяется с ним.
+async function watchVersion() {
+  const read = async () => {
+    try {
+      const r = await fetch(new URL('../version.json', import.meta.url), { cache: 'no-store' });
+      return r.ok ? (await r.json()).sha : null;
+    } catch { return null; }
+  };
+  S.version = await read();
+  if (!S.version) return;
+  setInterval(async () => {
+    const now = await read();
+    if (now && S.version && now !== S.version) {
+      setBanner('Вышла новая версия игры — обновите страницу, иначе будут старые ошибки');
+      $('#banner').style.cursor = 'pointer';
+      $('#banner').onclick = () => location.reload();
+    }
+  }, 180000);
+}
+
 function setBanner(text) {
   const el = $('#banner');
   el.textContent = text || '';
@@ -290,9 +329,10 @@ function bindMenu() {
   $('#btn-join').onclick = () => {
     const code = $('#join-code').value.trim().toUpperCase();
     if (code.length !== 5) { toast('Введите код из 5 символов'); return; }
-    send({ t: 'hello', name: myName(), token });
-    send({ t: 'join', code });
+    joinRoom(code);
   };
+  $('#jf-retry').onclick = () => { $('#join-fail').hidden = true; if (S.lastJoin) joinRoom(S.lastJoin); };
+  $('#jf-close').onclick = () => { $('#join-fail').hidden = true; };
   $('#join-code').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-join').click(); });
   $('#btn-bot').onclick = () => {
     const side = $('#bot-side').value;
