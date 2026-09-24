@@ -312,6 +312,9 @@ async function buildPro() {
     lane: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]],
   }));
   const laneVs = new Map();
+  // Пара союзников на одной линии: по одиночным показателям героев не видно, как они стоят
+  // линию вдвоём — а именно это и решает исход лёгкой и сложной линии.
+  const laneWith = new Map();
   const syn = mat(), vs = mat();
   const dur = { g: new Int32Array(N * DUR_BINS.length), w: new Int32Array(N * DUR_BINS.length) };
   let matches = 0;
@@ -365,6 +368,13 @@ async function buildPro() {
     for (const [A, B] of lanes) {
       const diff = (sum(A) - sum(B)) / A.length;
       for (const [side, other, sign] of [[A, B, 1], [B, A, -1]]) {
+        if (side.length === 2) {
+          const [x, y] = [side[0][0].h, side[1][0].h].sort((m, n) => m - n);
+          const kw = x * N + y;
+          const curW = laneWith.get(kw) || [0, 0];
+          curW[0]++; curW[1] += sign * diff;
+          laneWith.set(kw, curW);
+        }
         for (const [p, pos] of side) {
           hero[p.h].lane[pos][0]++;
           hero[p.h].lane[pos][1] += sign * diff;
@@ -387,7 +397,7 @@ async function buildPro() {
     if (b.p) { h.pick++; if (b.o <= 8) h.firstPhasePick++; }
     else { h.ban++; if (b.o <= 6) h.earlyBan++; }
   }
-  return { hero, laneVs, syn, vs, dur, matches, draftMatches: pbMatches.size };
+  return { hero, laneVs, laneWith, syn, vs, dur, matches, draftMatches: pbMatches.size };
 }
 
 // ---------- assemble ----------
@@ -423,7 +433,7 @@ async function main() {
       proDur: DUR_BINS.map((_, b) => [pro.dur.g[id * DUR_BINS.length + b], pro.dur.w[id * DUR_BINS.length + b]]),
     };
   }
-  const syn = [], vs = [], laneVs = [], proSyn = [], proVs = [];
+  const syn = [], vs = [], laneVs = [], laneWith = [], proSyn = [], proVs = [];
   for (let x = 0; x < ids.length; x++) for (let y = 0; y < ids.length; y++) {
     const a = ids[x], b = ids[y];
     if (a < b) {
@@ -435,6 +445,8 @@ async function main() {
     }
     const lv = pro.laneVs.get(a * N + b);
     if (lv) laneVs.push([a, b, lv[0], Math.round(lv[1] / lv[0])]);
+    const lw = pro.laneWith.get(a * N + b);
+    if (lw) laneWith.push([a, b, lw[0], Math.round(lw[1] / lw[0])]);
   }
   const stats = {
     meta: {

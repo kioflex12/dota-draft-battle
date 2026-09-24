@@ -183,6 +183,19 @@ export function createEngine(heroList, stats) {
   }
   const laneVsMap = new Map();
   for (const [a, b, n, m] of stats.laneVs) laneVsMap.set(key(a, b), [n, m]);
+  // Как пара союзников стоит линию вместе. Одиночные показатели этого не передают: два героя,
+  // каждый из которых сам по себе стоит линию средне, вдвоём могут её выигрывать — и наоборот.
+  // Данных может не быть (старый файл статистики) — тогда слагаемое просто равно нулю.
+  const laneWithMap = new Map();
+  for (const [a, b, n, m] of stats.laneWith || []) laneWithMap.set(key(Math.min(a, b), Math.max(a, b)), [n, m]);
+  const laneDuo = (a, b) => {
+    const lw = laneWithMap.get(key(Math.min(a, b), Math.max(a, b)));
+    if (!lw) return { v: 0, n: 0, raw: 0 };
+    const [n, m] = lw;
+    // Ожидание — сумма одиночных показателей пары; разница с ней и есть парный эффект.
+    const expected = laneAvg[a] + laneAvg[b];
+    return { v: (n / (n + K_LANE_PAIR)) * (m - expected), n, raw: m };
+  };
   const laneResidual = (a, b) => {
     const lv = laneVsMap.get(key(a, b));
     if (!lv) return { v: 0, n: 0 };
@@ -254,6 +267,23 @@ export function createEngine(heroList, stats) {
       const v = laneStr[h][p];
       if (Math.abs(v) > 150) reasons.push({ side: 'B', text: `${H.get(h).name} на позиции ${p + 1} в про-матчах ${v > 0 ? 'выигрывает' : 'проигрывает'} линию в среднем на ${Math.abs(Math.round(v))}`, v: -v });
     }
+    // Пара против пары: сначала собственный эффект каждой связки, потом встречи героев.
+    let duoTerm = 0;
+    for (const [side, sign] of [[Aheroes, 1], [Bheroes, -1]]) {
+      if (side.length !== 2) continue;
+      const d = laneDuo(side[0][0], side[1][0]);
+      if (!d.n) continue;
+      duoTerm += sign * d.v * 0.7;
+      if (d.n >= 5 && Math.abs(d.v) > 150) {
+        const [x, y] = [H.get(side[0][0]).name, H.get(side[1][0]).name];
+        reasons.push({
+          side: (sign > 0) === (d.v > 0) ? 'A' : 'B',
+          text: `${x} и ${y} вместе стоят линию ${d.v > 0 ? 'лучше' : 'хуже'}, чем каждый по отдельности (${d.raw > 0 ? '+' : ''}${Math.round(d.raw)} в ${d.n} про-играх)`,
+          v: sign * d.v,
+        });
+      }
+    }
+
     let pairTerm = 0, ctrTerm = 0, pairs = 0;
     for (const [a] of Aheroes) for (const [b] of Bheroes) {
       const lr = laneResidual(a, b);
@@ -283,11 +313,11 @@ export function createEngine(heroList, stats) {
       if (killA - killB >= 3) { heur += 120; reasons.push({ side: 'A', text: 'Больше контроля и урона на линии: высокий потенциал убийств', v: 120 }); }
       if (killB - killA >= 3) { heur -= 120; reasons.push({ side: 'B', text: 'Больше контроля и урона на линии: высокий потенциал убийств', v: -120 }); }
     }
-    const total = strength + pairTerm + ctrTerm + heur;
+    const total = strength + duoTerm + pairTerm + ctrTerm + heur;
     reasons.sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
     return {
       label, total: Math.round(total), prob: sig(total / 700),
-      parts: { strength: Math.round(strength), pairs: Math.round(pairTerm), counters: Math.round(ctrTerm), heur: Math.round(heur) },
+      parts: { strength: Math.round(strength), duo: Math.round(duoTerm), pairs: Math.round(pairTerm), counters: Math.round(ctrTerm), heur: Math.round(heur) },
       reasons: reasons.slice(0, 6),
     };
   }

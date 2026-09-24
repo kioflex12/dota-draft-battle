@@ -163,6 +163,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
       <ul class="lane-reasons">${l.reasons.length ? l.reasons.map(r => `<li class="${r.side}">${esc(r.text)}</li>`).join('') : '<li>Нет ярко выраженных факторов — исход линии решит игра игроков.</li>'}</ul>
       <div class="lane-parts">
         <span>Сила героев на линии: ${l.parts.strength > 0 ? '+' : ''}${l.parts.strength}</span>
+        ${l.parts.duo ? `<span>Связка на линии: ${l.parts.duo > 0 ? '+' : ''}${l.parts.duo}</span>` : ''}
         <span>Личные встречи: ${l.parts.pairs > 0 ? '+' : ''}${l.parts.pairs}</span>
         <span>Контрпики: ${l.parts.counters > 0 ? '+' : ''}${l.parts.counters}</span>
         <span>Дальность атаки/контроль: ${l.parts.heur > 0 ? '+' : ''}${l.parts.heur}</span>
