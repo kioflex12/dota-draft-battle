@@ -76,6 +76,9 @@ async function boot() {
   const code = codeFromLocation();
   if (code && /^[A-Z0-9]{5}$/i.test(code)) S.pendingJoin = code.toUpperCase();
   connect();
+  // Сеть подмешивает это в сердцебиение: сервер сверяет, тот ли ход у игрока на экране, и
+  // досылает состояние, если сообщение об изменении потерялось.
+  S.net.stateProbe = () => (S.room ? { phase: S.room.phase, step: S.room.draft ? S.room.draft.step : -1 } : null);
   setConn('connecting');
   watchConnLiveness();
   watchVersion();

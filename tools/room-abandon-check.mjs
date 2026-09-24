@@ -23,10 +23,12 @@ const check = (ok, text) => {
   if (!ok) problems++;
 };
 
+// Отправленные сообщения запоминаем: по ним проверяется, что комната чинит отставший экран.
+const sent = [];
 const manager = new RoomManager({
   engine,
   cmHeroes: heroes.heroes.filter(h => h.cm).map(h => h.id),
-  send: () => {},
+  send: (client, msg) => sent.push({ client, msg }),
 });
 // Собственный таймер менеджера здесь не нужен: время в проверке задаётся вручную.
 clearInterval(manager.timer);
@@ -93,6 +95,19 @@ manager.coverAbandonedTurn(room, t1 + 60_000);
 check(steps() === before, 'отсчёт идёт от повторного обрыва, а не от первого');
 manager.coverAbandonedTurn(room, t1 + 115_000);
 check(steps() === before + 1, 'через полторы минуты после повторного обрыва ход делается');
+
+// Сверка состояния по сердцебиению. Ради неё всё и затевалось: если сообщение об изменении не
+// доехало, у игрока на экране висит чужой ход и кнопка не нажимается — сам он это не починит.
+const spec = connect('Зритель', 'token-s');
+manager.handle(spec, { t: 'join', code: room.code });
+const pings = (step, phase) => { sent.length = 0; manager.handle(spec, { t: 'ping', at: 1, step, phase }); return sent.filter(x => x.client === spec && x.msg.t === 'room').length; };
+check(pings(Math.max(0, room.draft.step - 2), 'draft') === 1, 'отставшему экрану досылается состояние');
+check(pings(room.draft.step, 'draft') === 0, 'совпадающему экрану ничего лишнего не шлётся');
+check(pings(room.draft.step, 'lobby') === 1, 'разошедшийся этап комнаты тоже чинится');
+sent.length = 0;
+manager.handle(spec, { t: 'ping', at: 1 });
+check(sent.some(x => x.client === spec && x.msg.t === 'pong'), 'на пинг без состояния приходит ответ о задержке');
+check(!sent.some(x => x.msg.t === 'room'), 'пинг без состояния состояние не запрашивает');
 
 console.log(problems ? `\nПРОБЛЕМ: ${problems}` : '\nпроверки пройдены');
 process.exit(problems ? 1 : 0);

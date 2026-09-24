@@ -131,12 +131,19 @@ export class Net {
     this.onOpen();
   }
 
+  // Что сейчас на экране у игрока — комната подставляет это в сердцебиение, чтобы сервер видел
+  // отставшую картинку и чинил её сам. Задаётся снаружи: сети про экран знать нечего.
+  probe() {
+    const st = this.stateProbe?.();
+    return st ? { phase: st.phase, step: st.step } : {};
+  }
+
   // Задержка до сервера комнат. Для связи напрямую её меряет сердцебиение канала.
   startPing() {
     clearInterval(this.pingTimer);
-    const beat = () => { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'ping', at: Date.now() })); };
+    const beat = () => { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'ping', at: Date.now(), ...this.probe() })); };
     beat();
-    this.pingTimer = setInterval(beat, 10000);
+    this.pingTimer = setInterval(beat, 8000);
   }
 
   // Пока связь моргает, отправлять некуда. Раньше сообщение в этот момент просто пропадало:
@@ -272,8 +279,9 @@ export class Net {
     this.peer.on('connection', conn => {
       const client = this.manager.createClient();
       client.conn = conn;
+      // Пинг тоже идёт через комнату: она отвечает pong и заодно сверяет, не отстал ли экран
+      // гостя от настоящего состояния.
       conn.on('data', d => {
-        if (d && d.t === 'ping') { try { conn.send({ t: 'pong', at: d.at }); } catch {} return; }
         try { this.manager.handle(client, d); } catch (e) { console.error(e); }
       });
       conn.on('close', () => this.manager?.leave(client));
@@ -372,11 +380,11 @@ export class Net {
   // пытался сходить. Редкий пинг держит канал живым и обнаруживает разрыв заранее.
   startHeartbeat(conn) {
     clearInterval(this.beat);
-    try { conn.send({ t: 'ping', at: Date.now() }); } catch {}
+    try { conn.send({ t: 'ping', at: Date.now(), ...this.probe() }); } catch {}
     this.beat = setInterval(() => {
       if (!conn.open) { clearInterval(this.beat); return; }
-      try { conn.send({ t: 'ping', at: Date.now() }); } catch {}
-    }, 15000);
+      try { conn.send({ t: 'ping', at: Date.now(), ...this.probe() }); } catch {}
+    }, 8000);
   }
 
   retryGuest(code, attempt) {

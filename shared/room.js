@@ -274,9 +274,15 @@ export class RoomManager {
   handle(client, msg) {
     const room = client.room;
     switch (msg.t) {
-      // Замер задержки: клиент показывает её в индикаторе связи.
+      // Замер задержки: клиент показывает её в индикаторе связи. Заодно сверка состояния:
+      // клиент сообщает, какой ход у него на экране. Если сообщение об изменении до него не
+      // доехало, он так и будет видеть чужой ход, когда ходить надо ему, — и кнопка у него
+      // не нажимается. Расхождение лечится повторной отправкой состояния.
       case 'ping':
         this.send(client, { t: 'pong', at: msg.at });
+        if (room && msg.step != null && (msg.step !== (room.draft ? room.draft.step : -1) || msg.phase !== room.phase)) {
+          this.send(client, { t: 'room', room: this.publicRoom(room), you: { team: client.team, id: client.id } });
+        }
         break;
       case 'hello':
         client.name = String(msg.name || 'Игрок').slice(0, 20) || 'Игрок';
@@ -342,11 +348,18 @@ export class RoomManager {
         // прийти, когда ход уже сделан — тогда герой ушёл бы не в тот слот и не в ту фазу.
         if (msg.step != null && msg.step !== currentTurn(room.draft)?.index) {
           this.send(client, { t: 'error', error: 'Этот ход уже сделан' });
+          this.send(client, { t: 'room', room: this.publicRoom(room), you: { team: client.team, id: client.id } });
           return;
         }
         const actingTeam = room.mode === 'local' ? currentTurn(room.draft)?.team : client.team;
         const r = applyAction(room.draft, actingTeam, msg.hero == null ? null : Number(msg.hero));
-        if (!r.ok) { this.send(client, { t: 'error', error: r.error }); return; }
+        // Отказ почти всегда значит, что картинка у игрока отстала от комнаты, — вместе с
+        // объяснением отправляем свежее состояние, чтобы экран догнал сам.
+        if (!r.ok) {
+          this.send(client, { t: 'error', error: r.error });
+          this.send(client, { t: 'room', room: this.publicRoom(room), you: { team: client.team, id: client.id } });
+          return;
+        }
         this.afterAction(room);
         break;
       }
