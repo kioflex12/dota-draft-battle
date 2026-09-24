@@ -92,6 +92,32 @@ for (const [i, [rad, dire]] of DRAFTS.entries()) {
   if (worst > 1e-9) warn('контрпик несимметричен — оценка риска на этом не построится');
 }
 
+// Парная статистика линии. Проверяем знак: пара, которая по данным стоит линию лучше ожидания,
+// обязана получать плюс. Ошибка в масштабе базы переворачивает слагаемое целиком и при этом
+// выглядит правдоподобно в любом отдельном драфте — поймать её можно только так.
+{
+  console.log('');
+  console.log('--- связки на линии');
+  if (!stats.laneWith || !stats.laneWith.length) {
+    console.log('  данных о парах нет (файл статистики старее правки) — слагаемое не участвует');
+  } else {
+    console.log('  пар в данных: ' + stats.laneWith.length + ' (для сравнения, встреч героев: ' + stats.laneVs.length + ')');
+    const solid = stats.laneWith.filter(([, , n]) => n >= 8);
+    const byMean = [...solid].sort((x, y) => y[3] - x[3]);
+    const best = byMean[0], worst = byMean[byMean.length - 1];
+    for (const [tag, row] of [['лучшая', best], ['худшая', worst]]) {
+      if (!row) continue;
+      const [a, b, n, m] = row;
+      const d = engine.laneDuo(a, b);
+      const expected = (nm(a) + ' + ' + nm(b));
+      console.log(`  ${tag} пара: ${expected} — наблюдение ${m > 0 ? '+' : ''}${m} в ${n} играх, слагаемое ${d.v > 0 ? '+' : ''}${d.v.toFixed(0)}`);
+      if (Math.sign(d.v) !== Math.sign(m - 0) && Math.abs(m) > 50) warn(`знак парного слагаемого не совпал с наблюдением (${tag} пара)`);
+    }
+    const zero = solid.filter(([a, b]) => engine.laneDuo(a, b).v === 0).length;
+    if (zero === solid.length) warn('парное слагаемое всюду нулевое — данные не доходят до движка');
+  }
+}
+
 // Полный драфт по правилам Captains Mode: 24 хода ботом, затем разбор.
 {
   const d = createDraft({ firstTeam: 'radiant', timers: false });

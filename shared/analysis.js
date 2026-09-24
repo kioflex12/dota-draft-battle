@@ -174,12 +174,14 @@ export function createEngine(heroList, stats) {
   }
 
   // ---------- lanes ----------
-  const laneStr = {}, laneAvg = {};
+  const laneStr = {}, laneAvg = {}, laneAvgRaw = {};
   for (const id of ids) {
     const s = S(id);
     laneStr[id] = s.lane.map(([n, m]) => (n / (n + K_LANE)) * m);
     const tn = sum(s.lane.map(l => l[0]));
-    laneAvg[id] = tn ? sum(s.lane.map(([n, m]) => n * m)) / tn * (tn / (tn + K_LANE)) : 0;
+    // Без сжатия — нужен как база сравнения для парной статистики, которая тоже приходит сырой.
+    laneAvgRaw[id] = tn ? sum(s.lane.map(([n, m]) => n * m)) / tn : 0;
+    laneAvg[id] = laneAvgRaw[id] * (tn / (tn + K_LANE));
   }
   const laneVsMap = new Map();
   for (const [a, b, n, m] of stats.laneVs) laneVsMap.set(key(a, b), [n, m]);
@@ -192,8 +194,11 @@ export function createEngine(heroList, stats) {
     const lw = laneWithMap.get(key(Math.min(a, b), Math.max(a, b)));
     if (!lw) return { v: 0, n: 0, raw: 0 };
     const [n, m] = lw;
-    // Ожидание — сумма одиночных показателей пары; разница с ней и есть парный эффект.
-    const expected = laneAvg[a] + laneAvg[b];
+    // Ожидание — средний одиночный показатель пары. Именно средний, а не сумма: при сборе одно и
+    // то же значение (разница золота и опыта на героя) пишется и каждому герою, и паре, поэтому
+    // обе величины уже в одном масштабе. Сумма давала бы двойной размер и переворачивала знак:
+    // сильная пара получала бы штраф, слабая — премию. База берётся несжатой, как и сама пара.
+    const expected = (laneAvgRaw[a] + laneAvgRaw[b]) / 2;
     return { v: (n / (n + K_LANE_PAIR)) * (m - expected), n, raw: m };
   };
   const laneResidual = (a, b) => {
@@ -749,7 +754,7 @@ export function createEngine(heroList, stats) {
   }
 
   return {
-    ids, H, base, syn, ctr, pairInfo, posProb, posDetail, assign, analyze, evaluate, suggest, botChoice, botPlan, alternatives,
+    ids, H, base, syn, ctr, pairInfo, posProb, posDetail, assign, analyze, evaluate, suggest, botChoice, botPlan, alternatives, laneDuo,
     heroInfo, neededPositions, prob: (r, d) => sig(evaluate(r, d)), meta: stats.meta,
   };
 }
