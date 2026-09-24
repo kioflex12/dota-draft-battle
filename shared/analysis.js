@@ -141,13 +141,18 @@ export function createEngine(heroList, stats) {
     const freqPen = p >= 0.15 ? 0 : p >= 0.07 ? -0.07 : p >= 0.03 ? -0.16 : -0.3;
     let pen = freqPen, wrPos = null;
     if (p >= 0.35) return { prob: p, n, w, wrPos: n ? w / n : null, pen: 0 };
-    if (n >= 6) {
-      wrPos = (w + 6 * heroWr) / (n + 6);
-      const data = clamp((logit(wrPos) - logit(heroWr)) * (n / (n + 15)), -0.25, 0.12);
-      const conf = n / (n + 10);
-      pen = Math.min(data * conf + freqPen * (1 - conf) * 0.5, 0.05);
+    if (n >= 12) {
+      // Редкая роль не может доказать преимущество малой выборкой: десяток удачных игр на
+      // непривычной позиции — это удача конкретных матчей, а не свойство героя. Поэтому данные
+      // способны только смягчить штраф за редкость, но не поднять оценку выше нуля, и снимают
+      // штраф тем сильнее, чем больше игр. Раньше 6–15 игр давали доверие и даже бонус, и
+      // экзотический флекс получал плюс на всех стадиях игры.
+      wrPos = (w + 10 * heroWr) / (n + 10);
+      const data = clamp((logit(wrPos) - logit(heroWr)) * (n / (n + 40)), -0.25, 0);
+      const conf = n / (n + 30);
+      pen = data + freqPen * (1 - conf);
     }
-    return { prob: p, n, w, wrPos, pen };
+    return { prob: p, n, w, wrPos, pen: Math.min(pen, 0) };
   }
   const posAdj = (id, pos) => posDetail(id, pos).pen;
 
@@ -364,7 +369,10 @@ export function createEngine(heroList, stats) {
     }
 
     const posR = positionInfo(rad, ra), posD = positionInfo(dire, da);
-    const positions = sum(posR.map(p => p.pen)) - sum(posD.map(p => p.pen));
+    // Сумму штрафов за непривычные роли ограничиваем: состав, где каждый не на своём месте,
+    // играется плохо, но не «предрешённо плохо» — иначе одни только позиции решали бы драфт.
+    const posSum = list => clamp(sum(list.map(p => p.pen)), -0.5, 0);
+    const positions = posSum(posR) - posSum(posD);
 
     const lanes = [
       { key: 'bot', name: 'Нижняя линия', radiantRole: 'Лёгкая', direRole: 'Сложная', ...laneMatch([[rp[0], 0], [rp[4], 4]], [[dp[2], 2], [dp[3], 3]], 'bot'), radiant: [rp[0], rp[4]], dire: [dp[2], dp[3]] },
@@ -381,7 +389,9 @@ export function createEngine(heroList, stats) {
     // Линии тянут раннюю игру и почти не влияют на позднюю; берём уже откалиброванное слагаемое
     // (components.lanes), а не сырое, иначе часть перевеса осталась бы стоять плоско.
     const withoutLanes = total - components.lanes;
-    const at = (i) => sig(withoutLanes + components.lanes * laneWeightAt(CURVE_MINUTES[i]) + phaseShift(cr[i] - cd[i]));
+    // Кривая размахивает шире итоговой оценки — ранняя игра усилена перевесом линий. Предел
+    // нужен, чтобы отдельная минута не обещала 95%: таких гарантий драфт не даёт.
+    const at = (i) => sig(clamp(withoutLanes + components.lanes * laneWeightAt(CURVE_MINUTES[i]) + phaseShift(cr[i] - cd[i]), -1.7, 1.7));
     const winCurve = CURVE_MINUTES.map((_, i) => at(i));
     // Карточки стадий считаются по той же кривой, что нарисована рядом: иначе они с ней спорят.
     const avgWin = (i0, i1) => { let s = 0; for (let i = i0; i <= i1; i++) s += winCurve[i]; return s / (i1 - i0 + 1); };
