@@ -34,6 +34,34 @@ const peerError = e => PEER_ERROR[e && e.type] || ('Ошибка сети: ' + (
 // Что имеет смысл придержать до восстановления связи, а что протухает мгновенно.
 const QUEUED_KINDS = new Set(['action', 'chat', 'settings', 'start', 'swap', 'sit', 'coin', 'rematch']);
 
+// Адрес сервера комнат: параметр ?server=, сохранённый выбор, файл config.json рядом со сборкой.
+// Пустое значение означает «сервера нет» — тогда остаётся связь напрямую между браузерами.
+async function roomServerUrl() {
+  const toWs = v => {
+    if (!v) return '';
+    let u = String(v).trim();
+    if (!u) return '';
+    if (!/^wss?:\/\//.test(u)) u = (u.startsWith('http://') ? u.replace('http://', 'ws://') : u.replace(/^https:\/\//, 'wss://'));
+    if (!/^wss?:\/\//.test(u)) u = 'wss://' + u;
+    u = u.replace(/\/+$/, '');
+    return u.endsWith('/ws') ? u : u + '/ws';
+  };
+  const q = new URLSearchParams(location.search).get('server');
+  if (q !== null) {
+    try { q ? localStorage.setItem('roomServer', q) : localStorage.removeItem('roomServer'); } catch {}
+    return toWs(q);
+  }
+  try {
+    const saved = localStorage.getItem('roomServer');
+    if (saved) return toWs(saved);
+  } catch {}
+  try {
+    const res = await fetch(new URL('../config.json', import.meta.url), { cache: 'no-cache' });
+    if (res.ok) return toWs((await res.json()).server);
+  } catch {}
+  return '';
+}
+
 let peerLib;
 function loadPeerJs() {
   peerLib ??= new Promise((res, rej) => {
@@ -58,12 +86,26 @@ export class Net {
     this.mode = null;
     this.hello = { t: 'hello' };
     this.role = null;
-    if (forceP2P || location.protocol === 'file:' || location.hostname.endsWith('github.io')) queueMicrotask(() => this.startP2P());
-    else this.connectWs(true);
+    this.forceP2P = forceP2P;
+    // Через микрозадачу: обработчик onOpen обращается к уже созданному объекту сети, а при
+    // прямом вызове связь напрямую поднималась бы ещё до выхода из конструктора.
+    queueMicrotask(() => this.start());
   }
 
-  connectWs(first) {
-    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  // Порядок такой: сначала сервер комнат, если он указан, и только потом связь напрямую между
+  // браузерами. Связь напрямую держится на стороннем сигнальном сервере и обходе NAT — она
+  // работает не у всех и не всегда, поэтому со своим сервером игра куда надёжнее.
+  async start() {
+    if (this.forceP2P || location.protocol === 'file:') { this.startP2P(); return; }
+    const url = await roomServerUrl();
+    if (url) { this.serverUrl = url; this.connectWs(true, url); return; }
+    if (location.hostname.endsWith('github.io')) { this.startP2P(); return; }
+    this.connectWs(true);
+  }
+
+  connectWs(first, url) {
+    const target = url || this.serverUrl;
+    const ws = new WebSocket(target || ((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'));
     let opened = false;
     ws.onopen = () => { opened = true; this.mode = 'ws'; this.ws = ws; this.onOpen(); this.flush(); };
     ws.onmessage = e => this.onMessage(JSON.parse(e.data));
@@ -159,6 +201,7 @@ export class Net {
   }
 
   teardown(emitLeft) {
+    clearInterval(this.beat);
     this.stopHostWatch();
     this.manager?.destroy();
     try { this.conn?.close(); } catch {}
@@ -199,7 +242,7 @@ export class Net {
     this.peer.on('connection', conn => {
       const client = this.manager.createClient();
       client.conn = conn;
-      conn.on('data', d => { try { this.manager.handle(client, d); } catch (e) { console.error(e); } });
+      conn.on('data', d => { if (d && d.t === 'ping') return; try { this.manager.handle(client, d); } catch (e) { console.error(e); } });
       conn.on('close', () => this.manager?.leave(client));
       conn.on('error', () => this.manager?.leave(client));
     });
@@ -268,7 +311,8 @@ export class Net {
           this.flush();
           res();
         });
-        conn.on('data', d => this.onMessage(d));
+        conn.on('data', d => { if (d && d.t === 'ping') return; this.onMessage(d); });
+        this.startHeartbeat(conn);
         // Обрыв не означает, что хост ушёл насовсем: у него могло моргнуть подключение. Сначала
         // пробуем вернуться в ту же комнату и только потом сдаёмся — иначе партия теряется зря.
         conn.on('close', () => { if (this.role === 'guest') this.retryGuest(code, 0); });
@@ -281,6 +325,16 @@ export class Net {
         else rej(new Error(peerError(e)));
       });
     });
+  }
+
+  // Молчащий канал данных браузер закрывает не сразу, и обрыв всплывал только когда игрок
+  // пытался сходить. Редкий пинг держит канал живым и обнаруживает разрыв заранее.
+  startHeartbeat(conn) {
+    clearInterval(this.beat);
+    this.beat = setInterval(() => {
+      if (!conn.open) { clearInterval(this.beat); return; }
+      try { conn.send({ t: 'ping' }); } catch {}
+    }, 15000);
   }
 
   retryGuest(code, attempt) {
