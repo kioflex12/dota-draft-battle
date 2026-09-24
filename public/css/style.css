@@ -219,11 +219,13 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
   padding: 10px 14px 6px;
   gap: 12px;
 }
-.team-side { display: flex; gap: 12px; align-items: stretch; min-width: 0; }
-.team-side.dire { justify-content: flex-end; }
-.team-meta { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; flex: 0 1 110px; }
-.team-side.dire .team-meta { text-align: right; align-items: flex-end; }
-.team-name { font-family: var(--head); font-size: clamp(13px, 1.3vw, 20px); letter-spacing: .08em; text-transform: uppercase; display: flex; align-items: center; gap: 8px; line-height: 1.05; }
+.team-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* У Тьмы в разметке сначала слоты, потом название — разворачиваем, чтобы обе колонки
+   начинались одинаково. */
+.team-side.dire { flex-direction: column-reverse; justify-content: flex-end; }
+.team-meta { display: flex; flex-direction: row; align-items: baseline; gap: 10px; min-width: 0; }
+.team-side.dire .team-meta { justify-content: flex-end; }
+.team-name { font-family: var(--head); font-size: clamp(13px, 1.3vw, 20px); letter-spacing: .08em; text-transform: uppercase; display: flex; align-items: center; gap: 8px; line-height: 1.05; white-space: nowrap; }
 .team-side.dire .team-name { justify-content: flex-end; }
 .team-side.radiant .team-name { color: var(--radiant-2); }
 .team-side.dire .team-name { color: var(--dire-2); }
@@ -233,9 +235,9 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .reserve::before { content: 'РЕЗЕРВ '; font-size: 11px; color: var(--dim); }
 .reserve.active { color: var(--gold); }
 
-.picks { display: flex; gap: 6px; }
+.picks { display: flex; gap: 6px; width: 100%; }
 .pick-slot {
-  width: clamp(56px, 6vw, 112px); aspect-ratio: 3 / 4; flex: 0 1 auto; min-width: 0;
+  flex: 1 1 0; width: auto; min-width: 0; aspect-ratio: 3 / 4; max-height: 230px;
   background: linear-gradient(180deg, #1a202a, #0f1319);
   border: 1px solid var(--line2);
   border-radius: 3px;
@@ -246,8 +248,8 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 /* The render is a transparent-background model, so it needs something behind it. */
 .slot-bg { position: absolute; inset: -8px; background-size: cover; background-position: 50% 18%; filter: blur(12px) brightness(.5) saturate(.9); }
 .pick-slot video { object-position: 50% 12%; transform: scale(1.08); transform-origin: 50% 10%; }
-.pick-slot .slot-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 4px 4px; font-size: 12px; text-align: center; background: linear-gradient(transparent, rgba(0, 0, 0, .9)); font-family: var(--head); letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pick-slot .slot-order { position: absolute; top: 3px; left: 4px; font-size: 10px; color: var(--dim); font-family: var(--head); }
+.pick-slot .slot-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 4px 5px; font-size: clamp(12px, 1vw, 15px); text-align: center; background: linear-gradient(transparent, rgba(0, 0, 0, .9)); font-family: var(--head); letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-slot .slot-order { position: absolute; top: 4px; left: 6px; font-size: 12px; color: var(--dim); font-family: var(--head); }
 .pick-slot.current { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
 .pick-slot.current::after { content: ''; position: absolute; inset: 0; box-shadow: 0 0 26px rgba(227, 180, 92, .7) inset; animation: pulse 1.4s ease-in-out infinite; pointer-events: none; }
 .radiant .pick-slot.filled { border-color: rgba(111, 191, 63, .6); }
@@ -282,12 +284,12 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 #screen-draft.turn-mine .center-clock { box-shadow: inset 0 0 0 2px var(--gold), 0 0 32px rgba(227, 180, 92, .3); background: rgba(227, 180, 92, .07); }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 
-.team-stack { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.team-stack { display: flex; flex-direction: column; gap: 6px; min-width: 0; width: 100%; }
 .team-side.dire .team-stack { align-items: flex-end; }
 .bans { display: flex; gap: 4px; flex-wrap: wrap; }
 .team-side.dire .bans { justify-content: flex-end; }
-.ban-slot { width: clamp(30px, 3.1vw, 48px); aspect-ratio: 3 / 4; flex: 0 1 auto; min-width: 0; border: 1px solid var(--line); border-radius: 2px; position: relative; overflow: hidden; background: #0f131a; }
-.ban-slot img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 12%; filter: grayscale(1) brightness(.6); }
+.ban-slot { width: clamp(26px, 2.6vw, 46px); aspect-ratio: 1 / 1; flex: 0 1 auto; min-width: 0; border: 1px solid var(--line); border-radius: 2px; position: relative; overflow: hidden; background: #0f131a; }
+.ban-slot img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 6%; filter: grayscale(1) brightness(.6); }
 .ban-slot.filled::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top right, transparent calc(50% - 1px), var(--bad) 50%, transparent calc(50% + 1px)); }
 .ban-slot.current { border-color: var(--gold); box-shadow: 0 0 10px rgba(227, 180, 92, .6); }
 .ban-slot.skipped { background: repeating-linear-gradient(45deg, #151a22 0 4px, #0f131a 4px 8px); }
@@ -665,8 +667,9 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
   .center-clock { grid-area: clock; min-width: 0; }
   .team-side.radiant { grid-area: rad; }
   .team-side.dire { grid-area: dire; }
-  .pick-slot { width: clamp(40px, 13vw, 56px); }
-  .ban-slot { width: clamp(24px, 8vw, 34px); }
+  .pick-slot { flex: 0 1 auto; width: clamp(40px, 13vw, 56px); max-height: none; }
+  .picks { flex-wrap: wrap; width: auto; }
+  .ban-slot { width: clamp(22px, 7vw, 30px); }
   .big-timer { font-size: 34px; }
   .phase-name, .order-note { font-size: 11px; }
   .turn-label { font-size: 13px; }
@@ -679,7 +682,8 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
   /* У Тьмы порядок в разметке зеркальный (сначала слоты, потом имя) — на телефоне колонки
      должны начинаться одинаково, с названия команды. */
   .team-side.dire { flex-direction: column-reverse; align-items: center; justify-content: flex-end; }
-  .team-meta, .team-side.dire .team-meta { flex: none; align-items: center; text-align: center; }
+  /* В узкой колонке название, капитан и резерв в строку не помещаются — возвращаем столбик. */
+  .team-meta, .team-side.dire .team-meta { flex: none; flex-direction: column; align-items: center; text-align: center; gap: 1px; }
   .team-side.dire .fp-badge { align-self: center; }
   .team-stack, .team-side.dire .team-stack { align-items: center; width: 100%; }
   .picks, .bans, .team-side.dire .bans { flex-wrap: wrap; justify-content: center; }
