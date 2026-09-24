@@ -77,8 +77,13 @@ export class RoomManager {
 
   broadcast(room) {
     const state = this.publicRoom(room);
-    // Свою раскладку игрок видит всегда — в том числе вернувшись после обрыва.
-    for (const c of room.clients) this.send(c, { t: 'room', room: state, you: { team: c.team, id: c.id, layout: this.ownLayout(room, c) } });
+    for (const c of room.clients) this.sendState(c, room, state);
+  }
+
+  // Состояние уходит одним и тем же путём отовсюду: иначе в отдельных местах теряется часть
+  // полей — например своя раскладка линий, которую игрок должен видеть и после обрыва.
+  sendState(client, room, state) {
+    this.send(client, { t: 'room', room: state || this.publicRoom(room), you: { team: client.team, id: client.id, layout: this.ownLayout(room, client) } });
   }
 
   // Что показать этому клиенту как «его» раскладку. На одном экране играют за обе стороны, там
@@ -351,9 +356,7 @@ export class RoomManager {
       // не нажимается. Расхождение лечится повторной отправкой состояния.
       case 'ping':
         this.send(client, { t: 'pong', at: msg.at });
-        if (room && msg.step != null && (msg.step !== (room.draft ? room.draft.step : -1) || msg.phase !== room.phase)) {
-          this.send(client, { t: 'room', room: this.publicRoom(room), you: { team: client.team, id: client.id } });
-        }
+        if (room && msg.step != null && (msg.step !== (room.draft ? room.draft.step : -1) || msg.phase !== room.phase)) this.sendState(client, room);
         break;
       case 'hello':
         client.name = String(msg.name || 'Игрок').slice(0, 20) || 'Игрок';
@@ -419,7 +422,7 @@ export class RoomManager {
         // прийти, когда ход уже сделан — тогда герой ушёл бы не в тот слот и не в ту фазу.
         if (msg.step != null && msg.step !== currentTurn(room.draft)?.index) {
           this.send(client, { t: 'error', error: 'Этот ход уже сделан' });
-          this.send(client, { t: 'room', room: this.publicRoom(room), you: { team: client.team, id: client.id } });
+          this.sendState(client, room);
           return;
         }
         const actingTeam = room.mode === 'local' ? currentTurn(room.draft)?.team : client.team;
@@ -428,7 +431,7 @@ export class RoomManager {
         // объяснением отправляем свежее состояние, чтобы экран догнал сам.
         if (!r.ok) {
           this.send(client, { t: 'error', error: r.error });
-          this.send(client, { t: 'room', room: this.publicRoom(room), you: { team: client.team, id: client.id } });
+          this.sendState(client, room);
           return;
         }
         this.afterAction(room);
