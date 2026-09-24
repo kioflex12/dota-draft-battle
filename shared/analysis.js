@@ -32,6 +32,8 @@ const CAL = 0.7;
 // Насколько сильно риск ответного пика опускает кандидата. Подобрано так, чтобы он разводил
 // близких по силе героев, но не перевешивал реальную выгоду от пика.
 const RISK_WEIGHT = 0.8;
+// Насколько связность состава весит при выборе пика (в итоговом разборе вес остаётся прежним).
+const DRAFT_COMP_WEIGHT = 2.5;
 const PHASE_CENTERS = [16, 22.5, 27.5, 32.5, 37.5, 42.5, 47.5, 55, 65];
 export const CURVE_MINUTES = [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
 
@@ -255,6 +257,13 @@ export function createEngine(heroList, stats) {
     const pa = assign(A), pb = assign(B);
     A.forEach((a, i) => { v += posAdj(a, pa.pos[i]); });
     B.forEach((b, i) => { v -= posAdj(b, pb.pos[i]); });
+    // Раньше состав оценивался только у готовых пятёрок, поэтому по ходу драфта бот вообще не
+    // смотрел, складывается ли команда: пять сильных героев без контроля и инициации его
+    // устраивали. Теперь связность учитывается с первых пиков.
+    // Вес выше, чем в итоговом разборе: при выборе пика связность должна реально конкурировать
+    // с силой отдельного героя, иначе бот продолжит набирать сильных одиночек.
+    if (A.length) v += composition(A, pa.pos).adj * DRAFT_COMP_WEIGHT;
+    if (B.length) v -= composition(B, pb.pos).adj * DRAFT_COMP_WEIGHT;
     return v;
   }
   const partial = (A, B) => partialRaw(A, B) * CAL;
@@ -341,18 +350,24 @@ export function createEngine(heroList, stats) {
     const dmg = { phys: phys / wsum, mag: mag / wsum, pure: pure / wsum };
     const flags = [];
     let adj = 0;
-    if (r.disabler < 4) { adj -= 0.06; flags.push({ bad: true, text: 'Мало контроля — сложно ловить и добивать цели' }); }
-    else if (r.disabler >= 8) flags.push({ bad: false, text: 'Много контроля — сильные драки и ганги' });
-    if (r.initiator < 2) { adj -= 0.05; flags.push({ bad: true, text: 'Нет явного инициатора — трудно начинать драки' }); }
-    else if (r.initiator >= 5) flags.push({ bad: false, text: 'Несколько инициаторов — можно навязывать драки' });
-    if (r.carry < 3) { adj -= 0.04; flags.push({ bad: true, text: 'Слабый керри-потенциал — поздняя игра под вопросом' }); }
-    if (r.durable < 2) { adj -= 0.03; flags.push({ bad: true, text: 'Хрупкий состав — нет героев, способных впитывать урон' }); }
-    else if (r.durable >= 6) flags.push({ bad: false, text: 'Очень живучий состав' });
-    if (Math.max(dmg.phys, dmg.mag) > 0.75) { adj -= 0.04; flags.push({ bad: true, text: `Почти весь урон ${dmg.phys > dmg.mag ? 'физический' : 'магический'} — соперник легко закроется предметами` }); }
+    // Доля набранного состава: на трёх пиках требовать пятёрочные пороги бессмысленно, но следить
+    // за тем, что команда складывается связной, надо уже по ходу драфта.
+    const k = Math.max(0.2, team.length / 5);
+    if (r.disabler < 4 * k) { adj -= 0.06 * k; flags.push({ bad: true, text: 'Мало контроля — сложно ловить и добивать цели' }); }
+    else if (r.disabler >= 8 * k) flags.push({ bad: false, text: 'Много контроля — сильные драки и ганги' });
+    if (r.initiator < 2 * k) { adj -= 0.05 * k; flags.push({ bad: true, text: 'Нет явного инициатора — трудно начинать драки' }); }
+    else if (r.initiator >= 5 * k) flags.push({ bad: false, text: 'Несколько инициаторов — можно навязывать драки' });
+    if (r.carry < 3 * k) { adj -= 0.04 * k; flags.push({ bad: true, text: 'Слабый керри-потенциал — поздняя игра под вопросом' }); }
+    if (r.durable < 2 * k) { adj -= 0.03 * k; flags.push({ bad: true, text: 'Хрупкий состав — нет героев, способных впитывать урон' }); }
+    else if (r.durable >= 6 * k) flags.push({ bad: false, text: 'Очень живучий состав' });
+    if (team.length >= 3 && Math.max(dmg.phys, dmg.mag) > 0.75) { adj -= 0.04 * k; flags.push({ bad: true, text: `Почти весь урон ${dmg.phys > dmg.mag ? 'физический' : 'магический'} — соперник легко закроется предметами` }); }
     else flags.push({ bad: false, text: 'Сбалансированный тип урона' });
     if (r.pusher >= 5) flags.push({ bad: false, text: 'Сильный пуш — быстрые вышки и давление на карту' });
     if (r.escape >= 6) flags.push({ bad: false, text: 'Мобильный состав — хорошие ротации и отступления' });
-    if (ranged <= 1) flags.push({ bad: true, text: 'Почти все герои ближнего боя — сложно осаждать хай-граунд' });
+    // У этого признака раньше не было цены, только надпись. Как только состав начал учитываться
+    // при выборе пика, бот сразу же набрал мясных ближников: штрафуемые стороны он закрывал, а за
+    // отсутствие дальнего боя ему ничего не было.
+    if (team.length >= 3 && ranged <= Math.floor(team.length * 0.3)) { adj -= 0.04 * k; flags.push({ bad: true, text: 'Почти все герои ближнего боя — сложно осаждать хай-граунд' }); }
     return { roles: r, dmg, pierce, ranged, adj, flags };
   }
 
@@ -531,7 +546,7 @@ export function createEngine(heroList, stats) {
       const lt = laneMatch([[rp[0], 0], [rp[4], 4]], [[dp[2], 2], [dp[3], 3]]).total
         + laneMatch([[rp[1], 1]], [[dp[1], 1]]).total
         + laneMatch([[rp[2], 2], [rp[3], 3]], [[dp[0], 0], [dp[4], 4]]).total;
-      v += lt * LANE_TO_LOGIT + composition(rad, ra.pos).adj - composition(dire, da.pos).adj;
+      v += lt * LANE_TO_LOGIT;
       return v * CAL;
     }
     return partial(rad, dire);
