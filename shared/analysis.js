@@ -12,9 +12,11 @@ export const ROLE_NAMES = {
 export const POS_NAMES = ['Керри', 'Мидер', 'Оффлейнер', 'Роумер', 'Саппорт'];
 export const POS_SHORT = ['1', '2', '3', '4', '5'];
 
+// Сжатие парной статистики. Паблик-пары набирают сотни игр, поэтому сильное сжатие здесь просто
+// стирало сигнал: на проверочных матчах K=250 давало 54.0% угаданных сторон, K=60 — 55.3%.
 const K_PUB = 200;
 const K_PRO = 60;
-const K_PAIR_PUB = 250;
+const K_PAIR_PUB = 60;
 const K_PAIR_PRO = 60;
 const K_PHASE_PUB = 150;
 const K_PHASE_PRO = 25;
@@ -113,7 +115,7 @@ export function createEngine(heroList, stats) {
     pubBase[id] = logit((s.pubW + K_PUB * 0.5) / (s.pubG + K_PUB));
     proBase[id] = logit((s.proW + K_PRO * 0.5) / (s.proG + K_PRO));
     metaTerm[id] = clamp(0.5 * Math.log((contest[id] + 0.04) / (avgContest + 0.04)), -0.12, 0.2);
-    base[id] = 0.35 * pubBase[id] + 0.45 * proBase[id] + metaTerm[id];
+    base[id] = 0.5 * pubBase[id] + 0.35 * proBase[id] + metaTerm[id];
   }
 
   // ---------- pairs ----------
@@ -141,7 +143,7 @@ export function createEngine(heroList, stats) {
   // Проверка: tools/calibration.mjs, вес 1.4 против 0.2 — ошибка 0.6900 против 0.6885.
   const blend = (pub, pro) => {
     const wp = pub ? 0.6 : 0, wr = pro ? 0.2 * pro.g / (pro.g + 20) : 0;
-    return wp + wr ? ((pub?.adv || 0) * wp + (pro?.adv || 0) * wr) / (wp + wr) * 0.85 : 0;
+    return wp + wr ? ((pub?.adv || 0) * wp + (pro?.adv || 0) * wr) / (wp + wr) : 0;
   };
   const syn = (a, b) => blend(pubSyn.get(key(a, b)), proSyn.get(key(a, b)));
   const ctr = (a, b) => blend(pubVs.get(key(a, b)), proVs.get(key(a, b)));
