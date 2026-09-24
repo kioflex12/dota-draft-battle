@@ -133,9 +133,14 @@ const ICE_TEST = [
 ];
 
 const send = msg => S.net?.send(msg);
+// Переход по ссылке на комнату не должен выбрасывать в главное меню: пока идёт подключение,
+// показываем отдельный экран с кодом и возможностью отменить. Иначе человек стоит в меню, не
+// понимая, ждать ему или нажимать кнопки.
 const joinRoom = code => {
   S.lastJoin = code;
   $('#join-fail').hidden = true;
+  $('#joining-code').textContent = code;
+  show('joining');
   send({ t: 'hello', name: myName(), token });
   send({ t: 'join', code });
 };
@@ -143,6 +148,7 @@ const myName = () => ($('#name-input').value.trim() || 'Капитан').slice(0
 
 function onMessage(msg) {
   if (msg.t === 'room') {
+    S.lastJoin = null;
     const prev = S.room;
     S.room = msg.room;
     S.you = msg.you;
@@ -153,7 +159,8 @@ function onMessage(msg) {
     toast(msg.error);
     // Тост живёт пару секунд, а неудачный вход надо увидеть и переспросить: оставляем панель
     // с причиной и кнопкой повтора, иначе человек остаётся в меню без всякого объяснения.
-    if (/Комната не найдена|Связь с комнатой потеряна|не отвечает/.test(msg.error) && S.lastJoin) showJoinFail(msg.error);
+    if (S.lastJoin && /Комната не найдена|Связь с комнатой потеряна|не отвечает|Не удалось создать/.test(msg.error)) { show('menu'); showJoinFail(msg.error); }
+    else if (/Не удалось создать|не ответил/.test(msg.error)) { show('menu'); showCreateFail(msg.error); }
     if (msg.error.startsWith('Комната не найдена')) history.replaceState(null, '', basePath);
   } else if (msg.t === 'left') {
     S.room = null;
@@ -175,6 +182,7 @@ function onMessage(msg) {
     toast('Соединение восстановлено', true);
     setBanner(null);
   } else if (msg.t === 'joinRetry') {
+    $('#joining-note').textContent = `Комната не отвечает, пробуем ещё раз (${msg.attempt} из 2)…`;
     toast(`Комната не отвечает, пробуем ещё раз (${msg.attempt} из 2)…`);
   } else if (msg.t === 'queued') {
     setConn('waiting');
@@ -306,8 +314,19 @@ async function runNetTest() {
 
 function showJoinFail(reason) {
   const el = $('#join-fail');
-  el.querySelector('.jf-text').innerHTML = `Не удалось войти в комнату <b>${esc(S.lastJoin)}</b>. ${esc(reason)}.<br>
-    Комнату держит вкладка того, кто её создал: попросите его обновить страницу и прислать ссылку заново.`;
+  el.querySelector('.jf-text').innerHTML = `Не удалось войти в комнату <b>${esc(S.lastJoin || '')}</b>. ${esc(reason)}.<br>
+    Комнату держит вкладка того, кто её создал: попросите его обновить страницу и прислать ссылку заново.
+    Если не помогает — нажмите «Проверить связь» внизу: возможно, ваша сеть не пускает игроков друг к другу.`;
+  el.querySelector('#jf-retry').hidden = !S.lastJoin;
+  el.hidden = false;
+}
+
+// Комнату может не получиться и создать — тогда виновата не ссылка, а сеть или сервер.
+function showCreateFail(reason) {
+  const el = $('#join-fail');
+  el.querySelector('.jf-text').innerHTML = `${esc(reason)}<br>
+    Нажмите «Проверить связь» внизу: если сервер поиска игроков недоступен, комнату создать не выйдет — нужен свой сервер комнат.`;
+  el.querySelector('#jf-retry').hidden = true;
   el.hidden = false;
 }
 
@@ -397,6 +416,8 @@ function bindMenu() {
   };
   $('#jf-retry').onclick = () => { $('#join-fail').hidden = true; if (S.lastJoin) joinRoom(S.lastJoin); };
   $('#jf-close').onclick = () => { $('#join-fail').hidden = true; };
+  $('#joining-cancel').onclick = () => { S.lastJoin = null; if (S.net) { S.net.wantJoin = null; S.net.wantRoom = null; } show('menu'); };
+  $('#btn-create').addEventListener('click', () => { $('#join-fail').hidden = true; });
   $('#btn-nettest').onclick = e => { e.target.disabled = true; runNetTest().finally(() => { e.target.disabled = false; }); };
   $('#join-code').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-join').click(); });
   $('#btn-bot').onclick = () => {

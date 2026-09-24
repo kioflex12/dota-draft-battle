@@ -235,17 +235,24 @@ export class Net {
   }
 
   async becomeHost(createMsg) {
+    // Фоновые попытки войти в чужую комнату надо отменить: иначе очередная из них снесёт только
+    // что созданную комнату своим teardown, и кнопка «Создать» будет выглядеть мёртвой.
+    this.wantJoin = null;
+    this.wantRoom = null;
     this.teardown(false);
     const online = createMsg.mode === 'pvp';
     const Peer = online ? await loadPeerJs() : null;
     const code = !online ? randomCode() : await new Promise((res, rej) => {
+      // Сервер, который сводит игроков, может молчать вовсе — тогда обещание никогда не
+      // исполнится, и человек видит нажатую кнопку без всякого ответа.
+      const timer = setTimeout(() => rej(new Error('Сервер, который сводит игроков, не ответил за 15 секунд. Так бывает, когда его блокирует сеть или он перегружен.')), 15000);
       const tryCode = attempt => {
         const c = randomCode();
         const peer = new Peer(PEER_PREFIX + c, { config: ICE });
-        peer.on('open', () => { this.peer = peer; res(c); });
+        peer.on('open', () => { clearTimeout(timer); this.peer = peer; res(c); });
         peer.on('error', e => {
           if (e.type === 'unavailable-id' && attempt < 5) { peer.destroy(); tryCode(attempt + 1); return; }
-          if (!this.peer) { rej(new Error('Не удалось создать комнату. ' + peerError(e))); return; }
+          if (!this.peer) { clearTimeout(timer); rej(new Error('Не удалось создать комнату. ' + peerError(e))); return; }
           if (e.type !== 'peer-unavailable') this.onMessage({ t: 'error', error: peerError(e) });
         });
       };
