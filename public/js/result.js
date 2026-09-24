@@ -1,5 +1,5 @@
 import { esc, heroImg, fmtPct, signCls } from './util.js';
-import { toPct, POS_NAMES, ROLE_KEYS, ROLE_NAMES } from '../shared/analysis.js';
+import { toPct, marginRank, POS_NAMES, ROLE_KEYS, ROLE_NAMES } from '../shared/analysis.js';
 import { SEQUENCE, TEAM_NAME } from '../shared/draft.js';
 
 // Короткие формы для узкого элемента выбора: «Оффлейнер» в него не помещается.
@@ -21,7 +21,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
   // The engine guesses positions from pro data. The captain can restate them, and the whole
   // analysis — линии, штрафы за роль, состав — пересчитывается по заявленной раскладке.
   const layout = { radiant: null, dire: null };
-  let A, alts, pR, pD, favored, margin, verdict, youLine;
+  let A, alts, pR, pD, favored, margin, rank, verdict, youLine, scaleNote;
   const recalc = () => {
     A = engine.analyze(rad, dire, { posRadiant: layout.radiant, posDire: layout.dire });
     alts = engine.alternatives(d, { posRadiant: layout.radiant, posDire: layout.dire });
@@ -29,8 +29,19 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
     pD = 100 - pR;
     favored = pR >= 50 ? 'radiant' : 'dire';
     margin = Math.abs(pR - 50);
-    verdict = margin < 2.5 ? 'Равные драфты' : margin < 6 ? `Небольшой перевес: ${TEAM_NAME[favored]}` : margin < 12 ? `Драфт лучше у: ${TEAM_NAME[favored]}` : `Разгромный драфт: ${TEAM_NAME[favored]}`;
-    youLine = myTeam ? (favored === myTeam && margin >= 2.5 ? 'Ваш драфт сильнее' : margin < 2.5 ? 'Шансы примерно равны' : 'Драфт соперника сильнее') : '';
+    // Шанс победы переведён по замеру на реальных матчах, поэтому сами числа небольшие: драфт
+    // решает исход куда слабее, чем кажется. Чтобы «перевес 6%» читался, рядом идёт мерка —
+    // какая доля живых драфтов слабее этого.
+    rank = marginRank(margin);
+    verdict = margin < 1.2 ? 'Драфты равные'
+      : rank < 0.5 ? `Небольшой перевес: ${TEAM_NAME[favored]}`
+        : rank < 0.85 ? `Драфт лучше у: ${TEAM_NAME[favored]}`
+          : rank < 0.95 ? `Крупный перевес: ${TEAM_NAME[favored]}`
+            : `Разгромный драфт: ${TEAM_NAME[favored]}`;
+    scaleNote = margin < 1.2
+      ? 'Такой ровный расклад — примерно у четверти драфтов.'
+      : `Перевес крупнее, чем у ${Math.round(rank * 100)}% реальных драфтов.`;
+    youLine = myTeam ? (favored === myTeam && margin >= 1.2 ? 'Ваш драфт сильнее' : margin < 1.2 ? 'Шансы примерно равны' : 'Драфт соперника сильнее') : '';
   };
   recalc();
 
@@ -468,6 +479,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
         <div class="muted small">${room.mode === 'bot' ? 'Против бота — ' : room.mode === 'local' ? 'Игра на одном экране — ' : 'Товарищеский матч — '}рейтинг не изменится</div>
         <h2>${verdict}</h2>
         ${youLine ? `<div class="sub">${youLine}</div>` : ''}
+        <div class="muted small">${scaleNote} Проценты — замеренные: движок сверен с матчами, которых не видел.</div>
       </div>
       <div class="prob-bar">
         <div class="pct r"><small>СИЛЫ СВЕТА</small>${pR.toFixed(1)}%</div>

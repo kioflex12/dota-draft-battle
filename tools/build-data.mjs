@@ -15,6 +15,13 @@ const N = 160;
 const DUR_BINS = [0, 20, 25, 30, 35, 40, 45, 50, 60];
 
 const args = new Set(process.argv.slice(2));
+// Сборка «как было к такому-то дню»: нужна для проверки калибровки. Статистика строится только
+// по матчам до PRO_UNTIL, а оценивается потом на матчах после него — иначе движок проверяется на
+// тех же играх, из которых он и собран, и выглядит куда точнее, чем есть.
+// --offline берёт только то, что уже лежит в .cache, и не ходит в сеть.
+const PRO_UNTIL = Number(process.env.PRO_UNTIL || 0);
+const STATS_OUT = process.env.STATS_OUT || path.join(DATA, 'stats.json');
+const OFFLINE = args.has('--offline');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function getJson(url, tries = 5) {
@@ -35,6 +42,7 @@ async function getJson(url, tries = 5) {
 async function cached(name, fn) {
   const file = path.join(CACHE, name + '.json');
   try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch {}
+  if (OFFLINE) return null;
   const value = await fn();
   await fs.writeFile(file, JSON.stringify(value));
   return value;
@@ -216,6 +224,12 @@ async function findMatchIdAt(ts, lo, hi) {
   return lo;
 }
 
+async function cachedPubMax() {
+  const files = await fs.readdir(CACHE);
+  const ends = files.filter(f => f.startsWith('pub_') && f.endsWith('.json')).map(f => Number(f.replace('.json', '').split('_')[2]));
+  return Math.max(...ends.filter(Number.isFinite));
+}
+
 function mat() { return { g: new Int32Array(N * N), w: new Int32Array(N * N) }; }
 function durBin(sec) {
   const m = sec / 60;
@@ -225,8 +239,9 @@ function durBin(sec) {
 }
 
 async function buildPub() {
-  const maxRow = await sql('SELECT max(match_id) m FROM public_matches');
-  const maxId = Number(maxRow[0].m);
+  // В offline верхнюю границу берём из того, что уже скачано: иначе границы кусков сместятся и
+  // ни один кэш не подойдёт.
+  const maxId = OFFLINE ? await cachedPubMax() : Number((await sql('SELECT max(match_id) m FROM public_matches'))[0].m);
   const startId = await cached('pub_start_' + PATCH_TS, () => findMatchIdAt(PATCH_TS, maxId - 40_000_000, maxId));
   console.log(`pub range ${startId}..${maxId}`);
 
@@ -255,7 +270,7 @@ async function buildPub() {
 
   let i = 0;
   for (const [a, b] of chunks) {
-    const rows = await fetchChunk(a, b);
+    const rows = await fetchChunk(a, b) || [];
     for (const [rw, d, rt, dt] of rows) {
       if (!rt || !dt || rt.length !== 5 || dt.length !== 5 || rt.includes(0) || dt.includes(0)) continue;
       matches++;
@@ -284,7 +299,7 @@ async function buildPub() {
 // ---------- pro matches ----------
 
 async function buildPro() {
-  const now = Math.floor(Date.now() / 1000);
+  const now = PRO_UNTIL || Math.floor(Date.now() / 1000);
   const step = 7 * 86400;
   const perMatch = new Map();
   const pb = [];
@@ -297,7 +312,9 @@ async function buildPro() {
       const bans = await sql(`SELECT pb.match_id m, pb.hero_id h, pb.is_pick p, pb.ord o FROM picks_bans pb JOIN matches m USING(match_id) WHERE m.start_time >= ${a} AND m.start_time < ${b}`);
       return { players, bans };
     };
-    const { players, bans } = key ? await cached(key, load) : await load();
+    const week = key ? await cached(key, load) : (OFFLINE ? null : await load());
+    if (!week) continue;
+    const { players, bans } = week;
     for (const p of players) {
       if (!perMatch.has(p.m)) perMatch.set(p.m, []);
       perMatch.get(p.m).push(p);
@@ -407,8 +424,10 @@ async function main() {
   await fs.mkdir(CACHE, { recursive: true });
 
   console.log('heroes...');
-  const heroes = await buildHeroes();
-  await fs.writeFile(path.join(DATA, 'heroes.json'), JSON.stringify({ patch: PATCH, heroes }));
+  const heroes = OFFLINE
+    ? JSON.parse(await fs.readFile(path.join(DATA, 'heroes.json'), 'utf8')).heroes
+    : await buildHeroes();
+  if (!OFFLINE) await fs.writeFile(path.join(DATA, 'heroes.json'), JSON.stringify({ patch: PATCH, heroes }));
   console.log(`heroes: ${heroes.length}`);
   if (args.has('--heroes-only')) return;
 
@@ -453,11 +472,12 @@ async function main() {
       patch: PATCH, generatedAt: new Date().toISOString(),
       pubMatches: pub.matches, pubRank: 'Divine+', proMatches: pro.matches, proDrafts: pro.draftMatches,
       proSince: new Date(PRO_SINCE * 1000).toISOString().slice(0, 10),
+      proUntil: PRO_UNTIL ? new Date(PRO_UNTIL * 1000).toISOString().slice(0, 10) : null,
       durBins: DUR_BINS,
     },
     heroes: heroStats, syn, vs, laneVs, laneWith, proSyn, proVs,
   };
-  await fs.writeFile(path.join(DATA, 'stats.json'), JSON.stringify(stats));
+  await fs.writeFile(STATS_OUT, JSON.stringify(stats));
   console.log('done');
 }
 

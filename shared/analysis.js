@@ -15,7 +15,7 @@ export const POS_SHORT = ['1', '2', '3', '4', '5'];
 const K_PUB = 200;
 const K_PRO = 60;
 const K_PAIR_PUB = 250;
-const K_PAIR_PRO = 20;
+const K_PAIR_PRO = 60;
 const K_PHASE_PUB = 150;
 const K_PHASE_PRO = 25;
 const K_LANE = 20;
@@ -31,8 +31,17 @@ const PHASE_WEIGHT = 0.45;
 const LANE_DECAY_MIN = 0.35;
 const LANE_DECAY_SPAN = 1.45;
 const LANE_DECAY_TAU = 18;
-// Drafts rarely decide more than ~75/25 in real Dota; the raw sum of signals is overconfident.
-const CAL = 0.7;
+// Внутренняя шкала сравнения вариантов: ею меряются ходы бота и подбор альтернатив, где важен
+// порядок вариантов, а не то, во что он переводится в проценты.
+const DECIDE = 0.7;
+// Во сколько внутренняя оценка переводится в шанс на победу. Число замерено, а не подобрано на
+// глаз: tools/calibration.mjs прогоняет движок по матчам, которых в сборке статистики не было, и
+// подгоняет наклон. Вышло 0.33 на паблик-матчах Divine+ вне выборки и 0.50 на про-матчах
+// прошлого патча; берём середину. Пока перевода не было, разбор обещал 70–90% там, где на деле
+// выходило 55–58%: драфт решает исход куда слабее, чем выглядела сумма слагаемых.
+const WIN_SCALE = 0.45;
+// Перевод сырой суммы сразу в шкалу вероятности.
+const CAL = DECIDE * WIN_SCALE;
 // Насколько сильно риск ответного пика опускает кандидата. Подобрано так, чтобы он разводил
 // близких по силе героев, но не перевешивал реальную выгоду от пика.
 const RISK_WEIGHT = 0.8;
@@ -59,6 +68,24 @@ function permutations(n) {
 const PERMS = [0, 1, 2, 3, 4, 5].map(permutations);
 
 const EMPTY = { pubG: 0, pubW: 0, proG: 0, proW: 0, pick: 0, ban: 0, pos: [0, 0, 0, 0, 0], posW: [0, 0, 0, 0, 0], lane: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]], dur: [], proDur: [] };
+
+// Насколько велик перевес по меркам живых драфтов. Доли замерены на 12 000 матчей вне выборки
+// (6000 про-матчей и 6000 паблик-игр Divine+, см. tools/calibration.mjs): половина драфтов
+// держится в пределах 3 процентных пунктов, шесть из семи — в пределах 7, и лишь один из
+// двадцати переходит 9. Нужно затем, что после честного перевода в проценты сами числа стали
+// небольшими, и без такой мерки непонятно, 6% — это много или мало.
+const MARGIN_Q = [[0, 0], [3.15, 0.5], [4.8, 0.7], [6.75, 0.85], [9.05, 0.95], [11.9, 0.99], [18, 1]];
+export function marginRank(pp) {
+  const x = Math.abs(pp);
+  for (let i = 1; i < MARGIN_Q.length; i++) {
+    const [b, qb] = MARGIN_Q[i];
+    if (x <= b) {
+      const [a, qa] = MARGIN_Q[i - 1];
+      return qa + (qb - qa) * (x - a) / (b - a);
+    }
+  }
+  return 1;
+}
 
 export function createEngine(heroList, stats) {
   const H = new Map(heroList.map(h => [h.id, h]));
@@ -108,9 +135,12 @@ export function createEngine(heroList, stats) {
     const adv = pairAdv(g, w, sig(proBase[a] - proBase[b]), K_PAIR_PRO, 0.4);
     proVs.set(key(a, b), { g, w, adv }); proVs.set(key(b, a), { g, w: g - w, adv: -adv });
   }
-  // Pro evidence outweighs pubs as its sample grows; the blend never exceeds the stronger of the two signals.
+  // Про-сцена — поправка к паблик-статистике, а не главный голос. Раньше пара из двух десятков
+  // про-игр перевешивала тысячи паблик-игр, и движок попросту запоминал исходы тех самых матчей,
+  // по которым собран: на них он «угадывал» 94%, а на матчах, которых не видел, — 54%.
+  // Проверка: tools/calibration.mjs, вес 1.4 против 0.2 — ошибка 0.6900 против 0.6885.
   const blend = (pub, pro) => {
-    const wp = pub ? 0.6 : 0, wr = pro ? 1.4 * pro.g / (pro.g + 20) : 0;
+    const wp = pub ? 0.6 : 0, wr = pro ? 0.2 * pro.g / (pro.g + 20) : 0;
     return wp + wr ? ((pub?.adv || 0) * wp + (pro?.adv || 0) * wr) / (wp + wr) * 0.85 : 0;
   };
   const syn = (a, b) => blend(pubSyn.get(key(a, b)), proSyn.get(key(a, b)));
@@ -299,7 +329,7 @@ export function createEngine(heroList, stats) {
     if (B.length) v -= compAdj(B, pb.pos) * DRAFT_COMP_WEIGHT;
     return v;
   }
-  const partial = (A, B) => partialRaw(A, B) * CAL;
+  const partial = (A, B) => partialRaw(A, B) * DECIDE;
 
   function laneMatch(Aheroes, Bheroes, label) {
     const reasons = [];
@@ -457,7 +487,10 @@ export function createEngine(heroList, stats) {
       for (let i = 0; i < 5; i++) for (let j = i + 1; j < 5; j++) {
         const info = pairInfo(team[i], team[j], 'syn');
         if (k > 0) synR += info.v; else synD += info.v;
-        synPairs[arr].push({ a: team[i], b: team[j], ...info });
+        // В сумму идёт сырое значение (его умножат на калибровку вместе с остальными
+        // слагаемыми), а наружу — уже переведённое в проценты шанса: иначе подписи у пар
+        // обещают больше, чем итоговая оценка.
+        synPairs[arr].push({ a: team[i], b: team[j], ...info, v: info.v * CAL });
       }
     }
     let counters = 0;
@@ -465,7 +498,7 @@ export function createEngine(heroList, stats) {
     for (const a of rad) for (const b of dire) {
       const info = pairInfo(a, b, 'vs');
       counters += info.v;
-      ctrPairs.push({ a, b, ...info });
+      ctrPairs.push({ a, b, ...info, v: info.v * CAL });
     }
 
     const posR = positionInfo(rad, ra), posD = positionInfo(dire, da);
@@ -501,7 +534,7 @@ export function createEngine(heroList, stats) {
 
     const heroImpact = side => {
       const team = side === 'radiant' ? rad : dire, enemy = side === 'radiant' ? dire : rad;
-      return team.map(h => ({ hero: h, v: base[h] + sum(team.filter(x => x !== h).map(m => syn(h, m))) + sum(enemy.map(e => ctr(h, e))) })).sort((a, b) => b.v - a.v);
+      return team.map(h => ({ hero: h, v: (base[h] + sum(team.filter(x => x !== h).map(m => syn(h, m))) + sum(enemy.map(e => ctr(h, e)))) * CAL })).sort((a, b) => b.v - a.v);
     };
     const powerSpikes = side => (side === 'radiant' ? rad : dire).map(h => ({ hero: h, early: (phaseAt(h, 16) + phaseAt(h, 22.5)) / 2, late: (phaseAt(h, 47.5) + phaseAt(h, 55)) / 2 }));
 
@@ -572,19 +605,19 @@ export function createEngine(heroList, stats) {
       out.push({ team: bestLane.total > 0 ? 'radiant' : 'dire', kind: 'lane', text: `${bestLane.name} — главный перевес стадии линий (${bestLane.total > 0 ? '+' : ''}${bestLane.total}). Стоит помогать этой линии ротациями и рано ставить варды у соперника.` });
     }
     const topCtr = ctrPairs.slice().sort((a, b) => Math.abs(b.v) - Math.abs(a.v))[0];
-    if (topCtr && Math.abs(topCtr.v) > 0.04) {
+    if (topCtr && Math.abs(topCtr.v) > 0.04 * CAL) {
       const [w, l] = topCtr.v > 0 ? [topCtr.a, topCtr.b] : [topCtr.b, topCtr.a];
       out.push({ team: topCtr.v > 0 ? 'radiant' : 'dire', kind: 'counter', text: `Самый жёсткий контрпик драфта: ${nm(w)} против ${nm(l)} (+${toPct(Math.abs(topCtr.v)).toFixed(1)}% к победе).` });
     }
     for (const side of ['radiant', 'dire']) {
       const best = synPairs[side].slice().sort((a, b) => b.v - a.v)[0];
-      if (best && best.v > 0.04) out.push({ team: side, kind: 'synergy', text: `Лучшая связка: ${nm(best.a)} + ${nm(best.b)} (+${toPct(best.v).toFixed(1)}%).` });
+      if (best && best.v > 0.04 * CAL) out.push({ team: side, kind: 'synergy', text: `Лучшая связка: ${nm(best.a)} + ${nm(best.b)} (+${toPct(best.v).toFixed(1)}%).` });
       const flex = (side === 'radiant' ? posR : posD).find(p => p.text && p.pen >= -0.01);
       if (flex) out.push({ team: side, kind: 'flex', text: flex.text });
       const comp = side === 'radiant' ? compR : compD;
       for (const f of comp.flags.filter(f => f.bad).slice(0, 2)) out.push({ team: side, kind: 'warn', text: f.text });
     }
-    out.push({ team: fav, kind: 'verdict', text: Math.abs(toPct(total)) < 3 ? 'Драфты примерно равны: исход решит игра, а не пики.' : 'Драфт даёт этой стороне заметное преимущество.' });
+    out.push({ team: fav, kind: 'verdict', text: Math.abs(toPct(total)) < 1.4 ? 'Драфты примерно равны: исход решит игра, а не пики.' : 'Драфт даёт этой стороне заметное преимущество.' });
     return out;
   }
 
@@ -599,10 +632,14 @@ export function createEngine(heroList, stats) {
         + laneMatch([[rp[1], 1]], [[dp[1], 1]]).total
         + laneMatch([[rp[2], 2], [rp[3], 3]], [[dp[0], 0], [dp[4], 4]]).total;
       v += lt * LANE_TO_LOGIT;
-      return v * CAL;
+      return v * DECIDE;
     }
     return partial(rad, dire);
   }
+
+  // Внутренняя оценка в шанс на победу переводится только здесь — и только с замеренным
+  // множителем, чтобы проценты в разборе означали ровно то, что написано.
+  const winProb = v => sig(v * WIN_SCALE);
 
   // Насколько героя легко закрыть тем, что ещё не забанено и не взято. Простой матчап отвечает
   // на вопрос «как он играет против того, что уже стоит», а капитану важнее второе: чем ответят.
@@ -671,7 +708,7 @@ export function createEngine(heroList, stats) {
       for (const h of avail) {
         const v = evaluate([...mine, h], enemy) - now;
         // Слабый бот видит только «сильный ли герой сам по себе», сильный — весь расклад.
-        const naive = base[h] * CAL;
+        const naive = base[h] * DECIDE;
         const seen = naive + (v - naive) * skill;
         const meta = contest[h] * 0.05 * (mine.length < 3 ? 1 : 0.3);
         const risk = counterRisk(h, avail, enemySlots);
@@ -684,7 +721,7 @@ export function createEngine(heroList, stats) {
       for (const h of avail) {
         const v = evaluate([...enemy, h], mine) - now;
         // Слабый бан идёт по популярности героя, сильный — по тому, чем герой опасен именно здесь.
-        const naive = banRate[h] * 0.3 + base[h] * CAL * 0.5;
+        const naive = banRate[h] * 0.3 + base[h] * DECIDE * 0.5;
         const seen = naive + (v - naive) * skill;
         const meta = banRate[h] * (earlyBanPhase ? 0.12 : 0.05) + pickRate[h] * 0.03;
         scored.push({ hero: h, score: seen + meta, gain: v, reasons: explainCandidate(h, enemy, mine).map(r => 'соперникам: ' + r) });
@@ -727,7 +764,7 @@ export function createEngine(heroList, stats) {
   function alternatives(draft, { posRadiant, posDire } = {}) {
     const res = { radiant: [], dire: [] };
     const finalR = draft.picks.radiant, finalD = draft.picks.dire;
-    const baseProb = sig(evaluate(finalR, finalD));
+    const baseProb = winProb(evaluate(finalR, finalD));
     const finalPos = {};
     for (const [team, override] of [[finalR, posRadiant], [finalD, posDire]]) {
       const pos = validPos(override, team) ? override : assign(team).pos;
@@ -741,7 +778,7 @@ export function createEngine(heroList, stats) {
         const team = hEntry.team, enemyTeam = team === 'radiant' ? 'dire' : 'radiant';
         const mine = pickedBefore[team], enemy = pickedBefore[enemyTeam];
         const pos = finalPos[hEntry.hero];
-        const thenActual = sig(partial([...mine, hEntry.hero], enemy));
+        const thenActual = winProb(partial([...mine, hEntry.hero], enemy));
         // Пул на момент хода: всё, что тогда не было забанено и не было взято. Герои, взятые
         // соперником позже, сюда входят намеренно — на тот момент он мог взять их в ответ.
         const poolThen = ids.filter(c => H.get(c).cm && !usedBefore.has(c));
@@ -752,10 +789,10 @@ export function createEngine(heroList, stats) {
           if (!H.get(c).cm || usedBefore.has(c) || allPicked.has(c)) continue;
           const d = posDetail(c, pos);
           if (d.prob < 0.1 && !(d.n >= 6 && d.wrPos >= 0.48)) continue;
-          const then = (sig(partial([...mine, c], enemy)) - thenActual) * 0.6;
+          const then = (winProb(partial([...mine, c], enemy)) - thenActual) * 0.6;
           const r = finalR.map(x => (team === 'radiant' && x === hEntry.hero ? c : x));
           const dd = finalD.map(x => (team === 'dire' && x === hEntry.hero ? c : x));
-          const full = (team === 'radiant' ? 1 : -1) * (sig(evaluate(r, dd)) - baseProb);
+          const full = (team === 'radiant' ? 1 : -1) * (winProb(evaluate(r, dd)) - baseProb);
           const risk = counterRisk(c, poolThen, enemySlots);
           cands.push({ hero: c, then, full, risk: risk.v, riskBy: risk.by, safer: riskActual - risk.v, score: then * 0.65 + full * 0.35 - risk.v * RISK_WEIGHT });
         }
@@ -781,7 +818,7 @@ export function createEngine(heroList, stats) {
       const enemy = side === 'radiant' ? finalD : finalR;
       return team.map(h => {
         const mates = team.filter(x => x !== h);
-        return { hero: h, v: partial(team, enemy) - partial(mates, enemy), reasons: explainCandidate(h, mates, enemy) };
+        return { hero: h, v: (partial(team, enemy) - partial(mates, enemy)) * WIN_SCALE, reasons: explainCandidate(h, mates, enemy) };
       }).sort((a, b) => b.v - a.v);
     };
     const leftovers = side => {
@@ -790,7 +827,7 @@ export function createEngine(heroList, stats) {
       const out = [];
       for (const c of ids) {
         if (!H.get(c).cm || usedBefore.has(c)) continue;
-        const v = sum(enemy.map(e => ctr(c, e))) + sum(team.map(m => syn(c, m))) + base[c];
+        const v = (sum(enemy.map(e => ctr(c, e))) + sum(team.map(m => syn(c, m))) + base[c]) * CAL;
         out.push({ hero: c, v, reasons: explainCandidate(c, team, enemy) });
       }
       return out.sort((a, b) => b.v - a.v).slice(0, 5);
@@ -822,6 +859,6 @@ export function createEngine(heroList, stats) {
 
   return {
     ids, H, base, syn, ctr, pairInfo, posProb, posDetail, assign, analyze, evaluate, suggest, botChoice, botPlan, alternatives, laneDuo,
-    heroInfo, neededPositions, prob: (r, d) => sig(evaluate(r, d)), meta: stats.meta,
+    heroInfo, neededPositions, prob: (r, d) => winProb(evaluate(r, d)), meta: stats.meta,
   };
 }
