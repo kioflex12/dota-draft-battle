@@ -28,7 +28,8 @@ const args = new Set(process.argv.slice(2));
 const heroes = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/heroes.json'), 'utf8'));
 const statsFile = args.has('--split') ? path.join(CACHE, 'stats_train.json') : path.join(ROOT, 'data/stats.json');
 const stats = JSON.parse(fs.readFileSync(statsFile, 'utf8'));
-const engine = createEngine(heroes.heroes, stats);
+const stratz = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data/stratz.json'), 'utf8')); } catch { return null; } })();
+const engine = createEngine(heroes.heroes, stats, stratz);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function sql(query) {

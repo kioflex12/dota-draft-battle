@@ -55,16 +55,20 @@ async function boot() {
       ? `${Math.min(99, Math.round(progress.got / progress.total * 100))}%`
       : `${(progress.got / 1048576).toFixed(1)} МБ`;
   };
-  const [hd, st] = await Promise.all([
+  const [hd, st, sz] = await Promise.all([
     loadJson(new URL('../data/heroes.json', import.meta.url), onMeta, onChunk),
     loadJson(new URL('../data/stats.json', import.meta.url), onMeta, onChunk),
+    // Третий источник необязателен: если файла нет, движок считает позиции по про-матчам.
+    loadJson(new URL('../data/stratz.json', import.meta.url), onMeta, onChunk).catch(() => null),
   ]);
   S.heroes = hd.heroes;
   S.byId = new Map(S.heroes.map(h => [h.id, h]));
-  S.engine = createEngine(S.heroes, st);
+  S.engine = createEngine(S.heroes, st, sz);
   S.searchIdx = buildIndex(S.heroes);
   $('#patch-label').textContent = hd.patch;
-  $('#data-label').textContent = `${st.meta.proMatches.toLocaleString('ru')} про-матчей с ${st.meta.proSince} · ${st.meta.pubMatches.toLocaleString('ru')} матчей Divine+`;
+  const zGames = sz ? Object.values(sz.pos).reduce((a, p) => a + p.reduce((x, [n]) => x + n, 0), 0) : 0;
+  $('#data-label').textContent = `${st.meta.proMatches.toLocaleString('ru')} про-матчей с ${st.meta.proSince} · ${st.meta.pubMatches.toLocaleString('ru')} матчей Divine+`
+    + (zGames ? ` · ${zGames.toLocaleString('ru')} игр по позициям (STRATZ)` : '');
   $('#name-input').value = store('name') || '';
   $('#portraits-toggle').checked = S.portraits;
   buildGrid();

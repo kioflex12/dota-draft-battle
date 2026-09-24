@@ -89,7 +89,10 @@ export function marginRank(pp) {
   return 1;
 }
 
-export function createEngine(heroList, stats) {
+// Третий источник — STRATZ (data/stratz.json): сколько игр герой провёл на каждой позиции и с
+// каким исходом, по рейтингу Divine+/Immortal. Необязателен: без него движок работает как раньше,
+// на про-матчах, где у редкой роли набирается полтора десятка игр.
+export function createEngine(heroList, stats, stratz = null) {
   const H = new Map(heroList.map(h => [h.id, h]));
   const ids = heroList.map(h => h.id);
   const S = id => stats.heroes[id] || EMPTY;
@@ -154,7 +157,12 @@ export function createEngine(heroList, stats) {
   };
 
   // ---------- positions ----------
+  // Позиции по STRATZ, если он есть: [игр, побед] на каждой из пяти позиций, Divine+/Immortal.
+  const zpos = id => stratz?.pos?.[id] || null;
   const posProb = {};
+  // Доля игр на позиции: по-настоящему её видно только на большой выборке. Про-сцена важна как
+  // признак «так делают в серьёзном драфте», но её выборка мала, поэтому веса 0.65 и 0.35.
+  const STRATZ_SHARE = 0.65;
   for (const id of ids) {
     const h = H.get(id), s = S(id);
     const r = Object.fromEntries(ROLE_KEYS.map((k, i) => [k, h.roleLevels?.[i] || 0]));
@@ -167,7 +175,12 @@ export function createEngine(heroList, stats) {
     ];
     const ps = sum(prior);
     const total = sum(s.pos);
-    posProb[id] = s.pos.map((c, i) => (c + 10 * prior[i] / ps) / (total + 10));
+    const proShare = s.pos.map((c, i) => (c + 10 * prior[i] / ps) / (total + 10));
+    const z = zpos(id);
+    if (!z) { posProb[id] = proShare; continue; }
+    const zt = sum(z.map(([n]) => n));
+    const zShare = z.map(([n], i) => (n + 20 * prior[i] / ps) / (zt + 20));
+    posProb[id] = proShare.map((v, i) => STRATZ_SHARE * zShare[i] + (1 - STRATZ_SHARE) * v);
   }
 
   // Чего стоит герой на непривычной роли. Решают не редкость сама по себе, а результат: если
@@ -178,19 +191,30 @@ export function createEngine(heroList, stats) {
   // сломанный состав, а не «небольшой минус».
   function posDetail(id, pos) {
     const s = S(id);
-    const n = s.pos[pos], w = s.posW[pos];
+    const z = zpos(id);
+    // Доказательство берём там, где игр больше. По про-матчам у редкой роли набирается десяток
+    // игр — на таком числе «работает флекс или нет» решает случайность, а не герой.
+    const zt = z ? sum(z.map(([k]) => k)) : 0;
+    const n = z ? z[pos][0] : s.pos[pos];
+    const w = z ? z[pos][1] : s.posW[pos];
     const p = posProb[id][pos];
-    const heroWr = (s.proW + 10 * 0.5) / (s.proG + 20);
+    const heroWr = z
+      ? (sum(z.map(([, k]) => k)) + 10 * 0.5) / (zt + 20)
+      : (s.proW + 10 * 0.5) / (s.proG + 20);
     const freqPen = p >= 0.15 ? 0 : p >= 0.07 ? -0.09 : p >= 0.03 ? -0.2 : -0.4;
     let pen = freqPen, wrPos = null;
     if (p >= 0.35) return { prob: p, n, w, wrPos: n ? w / n : null, pen: 0 };
-    if (n >= 12) {
-      wrPos = (w + 10 * heroWr) / (n + 10);
+    // Порог доверия зависит от источника: сотня игр на позиции — это много для про-сцены и мало
+    // для паблик-выборки, где их бывают тысячи.
+    const K = z ? 150 : 10;
+    const need = z ? 60 : 12;
+    if (n >= need) {
+      wrPos = (w + K * heroWr) / (n + K);
       // Плюс за удачный флекс держим заметно скромнее минуса: хорошая серия на редкой роли
       // отчасти объясняется тем, что её берут в подходящий момент и под подходящий состав, а не
       // только свойствами героя. Доверие растёт с числом игр — и к плюсу, и к снятию штрафа.
-      const conf = n / (n + 30);
-      const data = clamp((logit(wrPos) - logit(heroWr)) * (n / (n + 40)), -0.25, 0.12);
+      const conf = n / (n + K * 3);
+      const data = clamp((logit(wrPos) - logit(heroWr)) * (n / (n + K * 4)), -0.25, 0.12);
       pen = data + freqPen * (1 - conf);
     }
     return { prob: p, n, w, wrPos, pen };
@@ -466,14 +490,18 @@ export function createEngine(heroList, stats) {
       const d = posDetail(h, pos);
       const name = H.get(h).name;
       let text = null;
-      if (d.n >= 6 && d.prob < 0.35) {
+      // Текст пишется только там, где есть что сказать: либо роль редкая и по ней есть замер,
+      // либо замера нет вовсе, а штраф стоит.
+      const who = `${name} на позиции ${pos + 1} (${POS_NAMES[pos]})`;
+      const share = `${d.prob < 0.005 ? 'меньше 1' : Math.round(d.prob * 100)}% его игр`;
+      if (d.wrPos != null && d.prob < 0.35) {
         text = d.pen > 0.01
-          ? `${name} на позиции ${pos + 1} (${POS_NAMES[pos]}): роль редкая (${Math.round(d.prob * 100)}% про-игр), но там он выигрывает ${Math.round(d.wrPos * 100)}% в ${d.n} играх — чаще, чем обычно. Флекс в плюс: +${toPct(d.pen).toFixed(1)}%.`
+          ? `${who}: роль редкая (${share}), но там он выигрывает ${Math.round(d.wrPos * 100)}% в ${d.n} играх — чаще, чем обычно. Флекс в плюс: +${toPct(d.pen).toFixed(1)}%.`
           : d.pen >= -0.01
-            ? `${name} на позиции ${pos + 1} (${POS_NAMES[pos]}): ${Math.round(d.prob * 100)}% про-игр, но винрейт там ${Math.round(d.wrPos * 100)}% в ${d.n} играх — флекс оправдан, штрафа нет.`
-            : `${name} на позиции ${pos + 1} (${POS_NAMES[pos]}): ${Math.round(d.prob * 100)}% про-игр, винрейт ${Math.round(d.wrPos * 100)}% в ${d.n} играх — на этой роли герой играет хуже обычного. Штраф ${toPct(d.pen).toFixed(1)}%.`;
+            ? `${who}: ${share}, и винрейт там ${Math.round(d.wrPos * 100)}% в ${d.n} играх — не хуже обычного, так что флекс оправдан и штрафа нет.`
+            : `${who}: ${share}, винрейт там ${Math.round(d.wrPos * 100)}% в ${d.n} играх — на этой роли герой играет хуже обычного. Штраф ${toPct(d.pen).toFixed(1)}%.`;
       } else if (d.pen < -0.01) {
-        text = `${name} на позиции ${pos + 1} (${POS_NAMES[pos]}): в про-матчах на этой роли ${d.n ? `всего ${d.n} игр` : 'не встречается'} — нет данных, что такой флекс работает. Штраф ${toPct(d.pen).toFixed(1)}%.`;
+        text = `${who}: на этой роли ${d.n ? `всего ${d.n} игр` : 'почти не играет'} — нет данных, что такой флекс работает. Штраф ${toPct(d.pen).toFixed(1)}%.`;
       }
       return { hero: h, pos, prob: d.prob, n: d.n, wrPos: d.wrPos, pen: d.pen, text };
     });

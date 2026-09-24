@@ -20,7 +20,8 @@ import { createDraft, applyAction, currentTurn, SEQUENCE } from '../shared/draft
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const heroes = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/heroes.json'), 'utf8'));
 const stats = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/stats.json'), 'utf8'));
-const engine = createEngine(heroes.heroes, stats);
+const stratz = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data/stratz.json'), 'utf8')); } catch { return null; } })();
+const engine = createEngine(heroes.heroes, stats, stratz);
 
 const cm = heroes.heroes.filter(h => h.cm).map(h => h.id).sort((a, b) => a - b);
 const nm = id => engine.H.get(id).name;

@@ -11,7 +11,9 @@ const PORT = Number(process.env.PORT) || 3000;
 
 const heroesData = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/heroes.json'), 'utf8'));
 const statsData = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/stats.json'), 'utf8'));
-const engine = createEngine(heroesData.heroes, statsData);
+// Файл STRATZ необязателен: без него движок считает позиции по про-матчам, как раньше.
+const stratzData = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data/stratz.json'), 'utf8')); } catch { return null; } })();
+const engine = createEngine(heroesData.heroes, statsData, stratzData);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',

@@ -16,7 +16,8 @@ import { currentTurn, isAvailable, applyAction } from '../shared/draft.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const heroes = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/heroes.json'), 'utf8'));
 const stats = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/stats.json'), 'utf8'));
-const engine = createEngine(heroes.heroes, stats);
+const stratz = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data/stratz.json'), 'utf8')); } catch { return null; } })();
+const engine = createEngine(heroes.heroes, stats, stratz);
 const cmHeroes = heroes.heroes.filter(h => h.cm).map(h => h.id);
 
 let problems = 0;
