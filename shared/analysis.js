@@ -163,16 +163,27 @@ export function createEngine(heroList, stats) {
   // на ней, а не на догадке. Негодная раскладка молча игнорируется.
   const validPos = (p, team) => Array.isArray(p) && p.length === team.length && new Set(p).size === team.length && p.every(v => Number.isInteger(v) && v >= 0 && v < 5);
 
+  // Расстановка и оценка состава считаются тысячи раз подряд (подбор альтернатив перебирает весь
+  // пул на каждый пик), а зависят только от самого набора героев. Память по набору снимает
+  // повторный счёт: без неё пересчёт альтернатив занимал больше секунды.
+  const assignMemo = new Map();
+  const compMemo = new Map();
+
   function assign(team) {
     const n = team.length;
     if (!n) return { pos: [], score: 0 };
+    const memoKey = team.join(',');
+    const hit = assignMemo.get(memoKey);
+    if (hit) return hit;
     let best = null, bestScore = -Infinity;
     for (const perm of PERMS[n]) {
       let sc = 0;
       for (let i = 0; i < n; i++) sc += Math.log(posProb[team[i]][perm[i]]);
       if (sc > bestScore) { bestScore = sc; best = perm; }
     }
-    return { pos: best, score: bestScore };
+    const res = { pos: best, score: bestScore };
+    assignMemo.set(memoKey, res);
+    return res;
   }
 
   // ---------- lanes ----------
@@ -262,8 +273,8 @@ export function createEngine(heroList, stats) {
     // устраивали. Теперь связность учитывается с первых пиков.
     // Вес выше, чем в итоговом разборе: при выборе пика связность должна реально конкурировать
     // с силой отдельного героя, иначе бот продолжит набирать сильных одиночек.
-    if (A.length) v += composition(A, pa.pos).adj * DRAFT_COMP_WEIGHT;
-    if (B.length) v -= composition(B, pb.pos).adj * DRAFT_COMP_WEIGHT;
+    if (A.length) v += compAdj(A, pa.pos) * DRAFT_COMP_WEIGHT;
+    if (B.length) v -= compAdj(B, pb.pos) * DRAFT_COMP_WEIGHT;
     return v;
   }
   const partial = (A, B) => partialRaw(A, B) * CAL;
@@ -336,7 +347,12 @@ export function createEngine(heroList, stats) {
     };
   }
 
-  function composition(team, pos) {
+  // Числа состава и приговор по ним. Пояснения собираются только когда их спросили: при выборе
+  // пика этот расчёт делается тысячи раз подряд, и строить там список текстов — впустую.
+  function compFacts(team, pos) {
+    const memoKey = team.join(',') + '|' + (pos ? pos.join(',') : '');
+    const hit = compMemo.get(memoKey);
+    if (hit) return hit;
     const r = Object.fromEntries(ROLE_KEYS.map(k => [k, 0]));
     let phys = 0, mag = 0, pure = 0, pierce = 0, ranged = 0, wsum = 0;
     team.forEach((h, i) => {
@@ -348,27 +364,39 @@ export function createEngine(heroList, stats) {
       if (H.get(h).ranged) ranged++;
     });
     const dmg = { phys: phys / wsum, mag: mag / wsum, pure: pure / wsum };
-    const flags = [];
-    let adj = 0;
     // Доля набранного состава: на трёх пиках требовать пятёрочные пороги бессмысленно, но следить
     // за тем, что команда складывается связной, надо уже по ходу драфта.
     const k = Math.max(0.2, team.length / 5);
-    if (r.disabler < 4 * k) { adj -= 0.06 * k; flags.push({ bad: true, text: 'Мало контроля — сложно ловить и добивать цели' }); }
-    else if (r.disabler >= 8 * k) flags.push({ bad: false, text: 'Много контроля — сильные драки и ганги' });
-    if (r.initiator < 2 * k) { adj -= 0.05 * k; flags.push({ bad: true, text: 'Нет явного инициатора — трудно начинать драки' }); }
-    else if (r.initiator >= 5 * k) flags.push({ bad: false, text: 'Несколько инициаторов — можно навязывать драки' });
-    if (r.carry < 3 * k) { adj -= 0.04 * k; flags.push({ bad: true, text: 'Слабый керри-потенциал — поздняя игра под вопросом' }); }
-    if (r.durable < 2 * k) { adj -= 0.03 * k; flags.push({ bad: true, text: 'Хрупкий состав — нет героев, способных впитывать урон' }); }
-    else if (r.durable >= 6 * k) flags.push({ bad: false, text: 'Очень живучий состав' });
-    if (team.length >= 3 && Math.max(dmg.phys, dmg.mag) > 0.75) { adj -= 0.04 * k; flags.push({ bad: true, text: `Почти весь урон ${dmg.phys > dmg.mag ? 'физический' : 'магический'} — соперник легко закроется предметами` }); }
-    else flags.push({ bad: false, text: 'Сбалансированный тип урона' });
-    if (r.pusher >= 5) flags.push({ bad: false, text: 'Сильный пуш — быстрые вышки и давление на карту' });
-    if (r.escape >= 6) flags.push({ bad: false, text: 'Мобильный состав — хорошие ротации и отступления' });
-    // У этого признака раньше не было цены, только надпись. Как только состав начал учитываться
-    // при выборе пика, бот сразу же набрал мясных ближников: штрафуемые стороны он закрывал, а за
-    // отсутствие дальнего боя ему ничего не было.
-    if (team.length >= 3 && ranged <= Math.floor(team.length * 0.3)) { adj -= 0.04 * k; flags.push({ bad: true, text: 'Почти все герои ближнего боя — сложно осаждать хай-граунд' }); }
-    return { roles: r, dmg, pierce, ranged, adj, flags };
+    const heavy = Math.max(dmg.phys, dmg.mag);
+    const checks = [
+      { on: r.disabler < 4 * k, pen: 0.06 * k, bad: true, text: 'Мало контроля — сложно ловить и добивать цели' },
+      { on: r.disabler >= 8 * k, pen: 0, bad: false, text: 'Много контроля — сильные драки и ганги' },
+      { on: r.initiator < 2 * k, pen: 0.05 * k, bad: true, text: 'Нет явного инициатора — трудно начинать драки' },
+      { on: r.initiator >= 5 * k, pen: 0, bad: false, text: 'Несколько инициаторов — можно навязывать драки' },
+      { on: r.carry < 3 * k, pen: 0.04 * k, bad: true, text: 'Слабый керри-потенциал — поздняя игра под вопросом' },
+      { on: r.durable < 2 * k, pen: 0.03 * k, bad: true, text: 'Хрупкий состав — нет героев, способных впитывать урон' },
+      { on: r.durable >= 6 * k, pen: 0, bad: false, text: 'Очень живучий состав' },
+      { on: team.length >= 3 && heavy > 0.75, pen: 0.04 * k, bad: true, text: `Почти весь урон ${dmg.phys > dmg.mag ? 'физический' : 'магический'} — соперник легко закроется предметами` },
+      { on: team.length >= 3 && heavy <= 0.75, pen: 0, bad: false, text: 'Сбалансированный тип урона' },
+      { on: r.pusher >= 5 * k, pen: 0, bad: false, text: 'Сильный пуш — быстрые вышки и давление на карту' },
+      { on: r.escape >= 6 * k, pen: 0, bad: false, text: 'Мобильный состав — хорошие ротации и отступления' },
+      // У этого признака раньше не было цены, только надпись. Как только состав начал учитываться
+      // при выборе пика, бот сразу набрал мясных ближников: штрафуемые стороны он закрывал, а за
+      // отсутствие дальнего боя ему ничего не было.
+      { on: team.length >= 3 && ranged <= Math.floor(team.length * 0.3), pen: 0.04 * k, bad: true, text: 'Почти все герои ближнего боя — сложно осаждать хай-граунд' },
+    ];
+    let adj = 0;
+    for (const c of checks) if (c.on) adj -= c.pen;
+    const out = { roles: r, dmg, pierce, ranged, adj, checks };
+    compMemo.set(memoKey, out);
+    return out;
+  }
+
+  const compAdj = (team, pos) => compFacts(team, pos).adj;
+
+  function composition(team, pos) {
+    const f = compFacts(team, pos);
+    return { roles: f.roles, dmg: f.dmg, pierce: f.pierce, ranged: f.ranged, adj: f.adj, flags: f.checks.filter(c => c.on).map(c => ({ bad: c.bad, text: c.text })) };
   }
 
   const curve = team => CURVE_MINUTES.map(m => sum(team.map(h => phaseAt(h, m))));
