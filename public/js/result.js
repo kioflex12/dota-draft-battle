@@ -36,6 +36,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
 
   const posOf = side => A.positions[side].map(p => p.pos);
   const setPos = (side, idx, want) => {
+    if (!canEdit(side)) return;
     const cur = posOf(side);
     const held = cur.indexOf(want);
     const was = cur[idx];
@@ -48,23 +49,32 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
 
   const name = t => room.seats[t]?.name || TEAM_NAME[t];
 
+  // Раскладку правит только капитан своей команды: чужие позиции — не его дело. В игре на одном
+  // экране и у зрителя своей стороны нет, поэтому там доступны обе.
+  const canEdit = side => !myTeam || myTeam === side;
+
   const teamBlock = side => {
     const pos = A.positions[side];
     const order = pos.map((p, i) => ({ ...p, idx: i })).sort((a, b) => a.pos - b.pos);
+    const editable = canEdit(side);
     return `
       <div class="res-team ${side}">
-        <div class="th"><b>${TEAM_NAME[side]}</b><span class="muted">${esc(name(side))}</span>${layout[side] ? `<button class="pos-reset" data-pos-auto="${side}">вернуть авто</button>` : ''}</div>
+        <div class="th"><b>${TEAM_NAME[side]}</b><span class="muted">${esc(name(side))}</span>${editable && layout[side] ? `<button class="pos-reset" data-pos-auto="${side}">вернуть авто</button>` : ''}</div>
         <div class="team-heroes">
           ${order.map(p => `
             <div class="th-hero">
               <img src="${img(p.hero)}" data-open="${p.hero}" alt="">
               <div class="nm" data-open="${p.hero}">${esc(H(p.hero).name)}</div>
-              <select class="posn ${p.pen < 0 ? 'off' : ''}" data-pos-side="${side}" data-pos-idx="${p.idx}" title="Поставьте позицию, на которой герой играл на самом деле — разбор пересчитается">
+              ${editable
+                ? `<select class="posn ${p.pen < 0 ? 'off' : ''}" data-pos-side="${side}" data-pos-idx="${p.idx}" title="Поставьте позицию, на которой герой играл на самом деле — разбор пересчитается">
                 ${POS_SHORT_ROLE.map((n, v) => `<option value="${v}" ${v === p.pos ? 'selected' : ''}>${v + 1} · ${n}</option>`).join('')}
-              </select>
+              </select>`
+                : `<div class="posn static ${p.pen < 0 ? 'off' : ''}">${p.pos + 1} · ${POS_SHORT_ROLE[p.pos]}</div>`}
             </div>`).join('')}
         </div>
-        <div class="pos-hint muted small">Позиции и линии определены по про-статистике. Если играли иначе — поменяйте здесь, разбор пересчитается.</div>
+        <div class="pos-hint muted small">${editable
+          ? 'Позиции и линии определены по про-статистике. Если играли иначе — поменяйте здесь, разбор пересчитается.'
+          : 'Позиции соперника определены по про-статистике. Менять можно только свою команду.'}</div>
       </div>`;
   };
 
@@ -229,6 +239,31 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
     <div class="matrix-legend">Строки — Силы Света, столбцы — Силы Тьмы. Зелёный — выигрывает герой Сил Света, красный — героя Сил Тьмы.</div>`;
   };
 
+  // Разбор по каждому герою: с кем ему хорошо, с кем плохо и на чём это основано. Матрица
+  // показывает всю картину разом, но не отвечает на вопрос «а что с этим героем».
+  const heroDigest = (hero, side) => {
+    const enemy = side === 'radiant' ? dire : rad;
+    const mates = (side === 'radiant' ? rad : dire).filter(x => x !== hero);
+    const duels = enemy.map(e => {
+      const c = A.counters.find(x => (x.a === hero && x.b === e) || (x.a === e && x.b === hero));
+      const v = toPct(c.v) * (c.a === hero ? 1 : -1);
+      return { hero: e, v, src: pairSrc(c) };
+    }).sort((a, b) => b.v - a.v);
+    const bonds = mates.map(m => {
+      const b = A.synergy[side].find(x => (x.a === hero && x.b === m) || (x.a === m && x.b === hero));
+      return { hero: m, v: toPct(b.v), src: pairSrc(b) };
+    }).sort((a, b) => b.v - a.v);
+    const chip = (x, positive) => `<span class="chip ${positive ? 'good' : 'bad'}" data-open="${x.hero}" data-tip="${esc(H(x.hero).name)}: ${fmtPct(x.v)}%<br><span class='muted'>${x.src}</span>"><img src="${img(x.hero)}" alt="">${esc(H(x.hero).name)} <b>${fmtPct(x.v)}</b></span>`;
+    const best = duels.filter(d => d.v > 0.3).slice(0, 3);
+    const worst = duels.filter(d => d.v < -0.3).slice(-3).reverse();
+    return `<div class="digest ${side}">
+      <div class="dh"><img src="${img(hero)}" data-open="${hero}" alt=""><b>${esc(H(hero).name)}</b></div>
+      <div class="drow"><span class="lbl">переигрывает</span><span class="chips">${best.length ? best.map(x => chip(x, true)).join('') : '<span class="muted small">никого заметно</span>'}</span></div>
+      <div class="drow"><span class="lbl">уступает</span><span class="chips">${worst.length ? worst.map(x => chip(x, false)).join('') : '<span class="muted small">никому заметно</span>'}</span></div>
+      <div class="drow"><span class="lbl">в связке</span><span class="chips">${bonds.length ? chip(bonds[0], bonds[0].v >= 0) + (bonds[bonds.length - 1].v < -0.3 ? chip(bonds[bonds.length - 1], false) : '') : ''}</span></div>
+    </div>`;
+  };
+
   const matchupsTab = () => {
     const duels = A.counters.slice().sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
     const strong = duels.filter(c => Math.abs(toPct(c.v)) >= 1).slice(0, 10);
@@ -242,9 +277,14 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
     };
     return `
       <div class="panel">
-        <h4>Кто кого переигрывает <button class="mx-toggle" data-mx>${mxTable ? 'списком' : 'таблицей'}</button></h4>
-        ${mxTable ? counterMatrix() : `<div class="duels">${shown.map(duelRow).join('')}</div>
-        <div class="muted small">Стрелка ведёт от того, кто выигрывает пару, к тому, кого переигрывают; толщина — насколько сильно. Показаны самые весомые пары, остальные — в таблице.</div>`}
+        <h4>Матрица контрпиков <button class="mx-toggle" data-mx>${mxTable ? 'к матрице' : 'самые весомые пары'}</button></h4>
+        ${mxTable ? `<div class="duels">${shown.map(duelRow).join('')}</div>
+        <div class="muted small">Стрелка ведёт от того, кто выигрывает пару, к тому, кого переигрывают; толщина — насколько сильно.</div>` : counterMatrix()}
+      </div>
+      <div class="panel">
+        <h4>Разбор по героям</h4>
+        <div class="digests">${rad.map(h => heroDigest(h, 'radiant')).join('')}${dire.map(h => heroDigest(h, 'dire')).join('')}</div>
+        <div class="muted small">Для каждого героя — кого он переигрывает и кому уступает из состава соперника, плюс его лучшая и худшая связка. Наведите на плашку, чтобы увидеть, на чём основана оценка.</div>
       </div>
       <div class="panel">
         <h4>Связки внутри команд</h4>
@@ -458,7 +498,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
   root.onclick = e => {
     if (e.target.closest('[data-pos-side]')) return;
     const auto = e.target.closest('[data-pos-auto]');
-    if (auto) { layout[auto.dataset.posAuto] = null; recalc(); draw(); return; }
+    if (auto) { if (canEdit(auto.dataset.posAuto)) { layout[auto.dataset.posAuto] = null; recalc(); draw(); } return; }
     const t = e.target.closest('[data-rtab]');
     if (t) {
       tab = t.dataset.rtab;

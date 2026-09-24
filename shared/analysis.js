@@ -21,6 +21,10 @@ const K_PHASE_PRO = 25;
 const K_LANE = 20;
 const K_LANE_PAIR = 12;
 const LANE_TO_LOGIT = 0.00006;
+// Сколько золота и опыта к 10-й минуте теряет герой, поставленный на чужую роль. Без этого он
+// просто не имел данных по такой позиции, вклад обнулялся — и абсурдная расстановка делала
+// оценку линий не хуже, а нейтральнее.
+const LANE_OFFROLE = 520;
 const PHASE_WEIGHT = 0.45;
 // Перевес на линии — это золото и опыт к 10-й минуте: к сороковой он либо уже превращён в
 // объекты, либо отыгран фармом. Поэтому в кривой по минутам он затухает, а не стоит плоско.
@@ -140,7 +144,8 @@ export function createEngine(heroList, stats) {
     const n = s.pos[pos], w = s.posW[pos];
     const p = posProb[id][pos];
     const heroWr = (s.proW + 10 * 0.5) / (s.proG + 20);
-    const freqPen = p >= 0.15 ? 0 : p >= 0.07 ? -0.07 : p >= 0.03 ? -0.16 : -0.3;
+    // Роль, на которой герой не играет вовсе, — это не «небольшой минус», а сломанный состав.
+    const freqPen = p >= 0.15 ? 0 : p >= 0.07 ? -0.09 : p >= 0.03 ? -0.2 : -0.4;
     let pen = freqPen, wrPos = null;
     if (p >= 0.35) return { prob: p, n, w, wrPos: n ? w / n : null, pen: 0 };
     if (n >= 12) {
@@ -196,6 +201,23 @@ export function createEngine(heroList, stats) {
     laneAvgRaw[id] = tn ? sum(s.lane.map(([n, m]) => n * m)) / tn : 0;
     laneAvg[id] = laneAvgRaw[id] * (tn / (tn + K_LANE));
   }
+  // Насколько герою вообще свойственна эта позиция: на чужой он стоит линию хуже, и данных о том,
+  // как именно, просто нет — поэтому штраф задаётся явно.
+  const laneFit = (h, p) => {
+    const pr = posProb[h][p];
+    return pr >= 0.18 ? 0 : -((0.18 - pr) / 0.18) * LANE_OFFROLE;
+  };
+
+  // Сила героя на конкретной линии. Если игр на этой позиции почти нет, вместо нуля берётся то,
+  // как герой стоит линии вообще, плюс штраф за чужую роль. Ноль означал бы «средне», и герой,
+  // который тут никогда не играл, выглядел бы лучше настоящего мидера с измеренным минусом —
+  // из-за этого абсурдная расстановка улучшала оценку линий вместо того, чтобы ухудшать.
+  const laneAt = (h, p) => {
+    const [n, m] = S(h).lane[p];
+    const w = n / (n + K_LANE);
+    return w * m + (1 - w) * laneAvgRaw[h] + laneFit(h, p);
+  };
+
   const laneVsMap = new Map();
   for (const [a, b, n, m] of stats.laneVs) laneVsMap.set(key(a, b), [n, m]);
   // Как пара союзников стоит линию вместе. Одиночные показатели этого не передают: два героя,
@@ -281,15 +303,15 @@ export function createEngine(heroList, stats) {
 
   function laneMatch(Aheroes, Bheroes, label) {
     const reasons = [];
-    const meanStr = side => sum(side.map(([h, p]) => laneStr[h][p])) / side.length;
+    const meanStr = side => sum(side.map(([h, p]) => laneAt(h, p))) / side.length;
     const duo = Aheroes.length > 1 ? 1.4 : 1;
     const strength = (meanStr(Aheroes) - meanStr(Bheroes)) * duo;
     for (const [h, p] of Aheroes) {
-      const v = laneStr[h][p];
+      const v = laneAt(h, p);
       if (Math.abs(v) > 150) reasons.push({ side: 'A', text: `${H.get(h).name} на позиции ${p + 1} в про-матчах ${v > 0 ? 'выигрывает' : 'проигрывает'} линию в среднем на ${Math.abs(Math.round(v))} (золото+опыт к 10 мин)`, v });
     }
     for (const [h, p] of Bheroes) {
-      const v = laneStr[h][p];
+      const v = laneAt(h, p);
       if (Math.abs(v) > 150) reasons.push({ side: 'B', text: `${H.get(h).name} на позиции ${p + 1} в про-матчах ${v > 0 ? 'выигрывает' : 'проигрывает'} линию в среднем на ${Math.abs(Math.round(v))}`, v: -v });
     }
     // Пара против пары: сначала собственный эффект каждой связки, потом встречи героев.
@@ -449,7 +471,9 @@ export function createEngine(heroList, stats) {
     const posR = positionInfo(rad, ra), posD = positionInfo(dire, da);
     // Сумму штрафов за непривычные роли ограничиваем: состав, где каждый не на своём месте,
     // играется плохо, но не «предрешённо плохо» — иначе одни только позиции решали бы драфт.
-    const posSum = list => clamp(sum(list.map(p => p.pen)), -0.5, 0);
+    // Предел оставлен, но заметно выше прежнего: команда, где все не на своих местах, должна
+    // выглядеть проигрышной, а не «чуть хуже».
+    const posSum = list => clamp(sum(list.map(p => p.pen)), -1.2, 0);
     const positions = posSum(posR) - posSum(posD);
 
     const lanes = [

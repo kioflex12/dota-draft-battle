@@ -557,6 +557,25 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .th-hero .posn.off { border-color: var(--bad); color: #ffc2b8; }
 .th-hero .posn option { background: var(--panel); color: var(--text); }
 .pos-hint { margin-top: 8px; line-height: 1.4; }
+.th-hero .posn.static { display: block; width: 100%; margin-top: 3px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 3px; color: var(--muted); font-size: 11.5px; text-align: center; }
+.th-hero .posn.static.off { border-color: rgba(239, 100, 80, .5); color: #ffc2b8; }
+
+/* Разбор по каждому герою: с кем ему хорошо, с кем плохо. Матрица показывает всю картину разом,
+   но не отвечает на вопрос «а что с этим героем». */
+.digests { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.digest { background: #10151c; border: 1px solid var(--line); border-left-width: 3px; border-radius: 5px; padding: 8px 10px; }
+.digest.radiant { border-left-color: var(--radiant); }
+.digest.dire { border-left-color: var(--dire); }
+.digest .dh { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.digest .dh img { width: 46px; height: 26px; object-fit: cover; border-radius: 3px; cursor: pointer; }
+.digest .drow { display: grid; grid-template-columns: 92px 1fr; align-items: start; gap: 6px; margin-top: 4px; }
+.digest .lbl { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding-top: 3px; }
+.digest .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px 2px 2px; border-radius: 12px; border: 1px solid var(--line2); background: #151b24; font-size: 11.5px; cursor: pointer; }
+.chip img { width: 26px; height: 15px; object-fit: cover; border-radius: 8px; }
+.chip.good { border-color: rgba(95, 208, 122, .45); color: #b7f5c4; }
+.chip.bad { border-color: rgba(239, 100, 80, .45); color: #ffc2b8; }
+.chip b { font-family: var(--head); }
 .pos-reset { background: none; border: 1px solid var(--line2); border-radius: 2px; color: var(--muted); font-family: var(--head); font-size: 11px; letter-spacing: .08em; padding: 0 6px; cursor: pointer; }
 .pos-reset:hover { color: var(--gold); border-color: var(--gold); }
 .th-hero .nm { font-size: 11px; text-align: center; padding: 3px 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -629,7 +648,7 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .duel .val { font-family: var(--head); font-size: 15px; letter-spacing: .04em; }
 .duel .bar { position: relative; width: calc(100% - 10px); height: calc(2px + var(--w) * 5px); background: currentColor; border-radius: 2px; opacity: calc(.4 + var(--w) * .6); }
 .duel .bar::after { content: ''; position: absolute; right: -9px; top: 50%; transform: translateY(-50%); border-left: 10px solid currentColor; border-top: calc(4px + var(--w) * 3px) solid transparent; border-bottom: calc(4px + var(--w) * 3px) solid transparent; }
-.mx-toggle { float: right; background: none; border: 1px solid var(--line2); border-radius: 3px; color: var(--muted); font-family: var(--head); font-size: 11px; letter-spacing: .08em; padding: 1px 8px; cursor: pointer; }
+.mx-toggle { margin-left: 10px; vertical-align: middle; background: none; border: 1px solid var(--line2); border-radius: 3px; color: var(--muted); font-family: var(--head); font-size: 11px; letter-spacing: .08em; padding: 1px 8px; cursor: pointer; }
 .mx-toggle:hover { color: var(--gold); border-color: var(--gold); }
 
 /* Связка: два портрета, соединённые линией со значением посередине. */
