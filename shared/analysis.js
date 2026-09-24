@@ -582,18 +582,31 @@ export function createEngine(heroList, stats) {
     return scored.slice(0, limit);
   }
 
-  function botChoice(draft, team, type, difficulty = 'normal') {
+  // Возвращает и сам ход, и то, насколько выбор был неочевиден (0 — кандидат вне конкуренции,
+  // 1 — несколько равных вариантов). Второе нужно, чтобы бот думал столько же, сколько думал бы
+  // человек: над очевидным баном — секунду, над спорным пиком — почти весь ход.
+  function botPlan(draft, team, type, difficulty = 'normal') {
     const skill = SKILL[difficulty] ?? SKILL.normal;
     const pool = suggest(draft, team, type, 30, skill);
-    if (!pool.length) return null;
+    if (!pool.length) return { hero: null, closeness: 0 };
     const cfg = { easy: { top: 25, temp: 0.12 }, normal: { top: 8, temp: 0.04 }, hard: { top: 3, temp: 0.012 } }[difficulty] || { top: 8, temp: 0.04 };
     const cand = pool.slice(0, cfg.top);
     const mx = cand[0].score;
     const weights = cand.map(c => Math.exp((c.score - mx) / cfg.temp));
     let r = Math.random() * sum(weights);
-    for (let i = 0; i < cand.length; i++) { r -= weights[i]; if (r <= 0) return cand[i].hero; }
-    return cand[0].hero;
+    let hero = cand[0].hero;
+    for (let i = 0; i < cand.length; i++) { r -= weights[i]; if (r <= 0) { hero = cand[i].hero; break; } }
+
+    // Мера неочевидности — разрыв между первым и вторым кандидатом. Шкала взята из замера по
+    // живым драфтам: медиана разрыва около 0.015, четверть ходов ниже 0.008, верхние — за 0.1.
+    // Относительная мера (доля от разброса топ-10) здесь не годилась: она почти всегда выходила
+    // около 0.8 и ходы между собой не различала.
+    const second = pool[1] ? pool[1].score : mx;
+    const closeness = Math.exp(-Math.max(0, mx - second) / 0.025);
+    return { hero, closeness };
   }
+
+  const botChoice = (draft, team, type, difficulty = 'normal') => botPlan(draft, team, type, difficulty).hero;
 
   // Alternatives are judged by what was known at the moment of the pick (earlier picks only) and
   // must fit the role the actual hero ended up playing; hindsight against the final draft is shown separately.
@@ -696,7 +709,7 @@ export function createEngine(heroList, stats) {
   }
 
   return {
-    ids, H, base, syn, ctr, pairInfo, posProb, posDetail, assign, analyze, evaluate, suggest, botChoice, alternatives,
+    ids, H, base, syn, ctr, pairInfo, posProb, posDetail, assign, analyze, evaluate, suggest, botChoice, botPlan, alternatives,
     heroInfo, neededPositions, prob: (r, d) => sig(evaluate(r, d)), meta: stats.meta,
   };
 }

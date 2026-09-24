@@ -160,14 +160,29 @@ export class RoomManager {
     if (!t) return;
     const seat = room.seats[t.team];
     if (!seat?.bot || seat.local) return;
-    const delay = 1200 + Math.random() * (room.difficulty === 'hard' ? 3500 : 2500);
+    // Ход выбирается сразу, а делается спустя паузу — как думал бы человек. Над очевидным баном
+    // думать нечего, над спорным пиком в середине драфта уходит почти всё время хода.
+    const plan = this.engine.botPlan(room.draft, t.team, t.type, room.difficulty);
     room.botTimer = setTimeout(() => {
       const cur = currentTurn(room.draft);
       if (!cur || cur.index !== t.index) return;
-      const hero = this.engine.botChoice(room.draft, cur.team, cur.type, room.difficulty);
-      applyAction(room.draft, cur.team, hero);
+      applyAction(room.draft, cur.team, plan.hero);
       this.afterAction(room);
-    }, delay);
+    }, this.botDelay(room, t, plan));
+  }
+
+  // Сколько бот «думает». Опорное время — время хода: в первой фазе банов оно короткое и решения
+  // там простые, а над пиками во второй фазе люди сидят до последних секунд.
+  botDelay(room, turn, plan) {
+    const budget = room.draft.timers ? turn.time : 22;
+    // Рутинный ход человек делает в первой трети времени, над спорным сидит заметно дольше.
+    const phaseShare = turn.phase === 0 ? 0.10 : turn.type === 'ban' ? 0.14 : 0.18;
+    const speed = { easy: 0.6, normal: 1, hard: 1.15 }[room.difficulty] ?? 1;
+    // Резерв на исходе — торопимся, как и живой капитан.
+    const reserve = room.draft.timers ? room.draft.reserve[turn.team] : 999;
+    const hurry = reserve < 20 ? 0.5 : 1;
+    const share = (phaseShare + 0.30 * plan.closeness) * speed * hurry * (0.8 + Math.random() * 0.4);
+    return Math.max(1500, Math.min(budget * share * 1000, budget * 0.85 * 1000, 14_000));
   }
 
   tick() {
@@ -316,6 +331,12 @@ export class RoomManager {
       }
       case 'action': {
         if (!room || room.phase !== 'draft' || !client.team) return;
+        // Ход помечен номером шага. Сообщение могло пролежать в очереди, пока связь моргала, и
+        // прийти, когда ход уже сделан — тогда герой ушёл бы не в тот слот и не в ту фазу.
+        if (msg.step != null && msg.step !== currentTurn(room.draft)?.index) {
+          this.send(client, { t: 'error', error: 'Этот ход уже сделан' });
+          return;
+        }
         const actingTeam = room.mode === 'local' ? currentTurn(room.draft)?.team : client.team;
         const r = applyAction(room.draft, actingTeam, msg.hero == null ? null : Number(msg.hero));
         if (!r.ok) { this.send(client, { t: 'error', error: r.error }); return; }

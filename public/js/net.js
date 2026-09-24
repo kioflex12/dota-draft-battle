@@ -31,6 +31,9 @@ const PEER_ERROR = {
 };
 const peerError = e => PEER_ERROR[e && e.type] || ('Ошибка сети: ' + ((e && (e.type || e.message)) || 'неизвестная'));
 
+// Что имеет смысл придержать до восстановления связи, а что протухает мгновенно.
+const QUEUED_KINDS = new Set(['action', 'chat', 'settings', 'start', 'swap', 'sit', 'coin', 'rematch']);
+
 let peerLib;
 function loadPeerJs() {
   peerLib ??= new Promise((res, rej) => {
@@ -62,7 +65,7 @@ export class Net {
   connectWs(first) {
     const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
     let opened = false;
-    ws.onopen = () => { opened = true; this.mode = 'ws'; this.ws = ws; this.onOpen(); };
+    ws.onopen = () => { opened = true; this.mode = 'ws'; this.ws = ws; this.onOpen(); this.flush(); };
     ws.onmessage = e => this.onMessage(JSON.parse(e.data));
     ws.onerror = () => {};
     ws.onclose = () => {
@@ -78,7 +81,46 @@ export class Net {
     this.onOpen();
   }
 
+  // Пока связь моргает, отправлять некуда. Раньше сообщение в этот момент просто пропадало:
+  // игрок жал «Забанить», и не происходило ничего — ни хода, ни объяснения. Теперь ход ждёт
+  // восстановления связи, а если не дождался — об этом говорят вслух.
+  queue(msg) {
+    this.pending = (this.pending || []).filter(x => Date.now() - x.at < 20_000);
+    this.pending.push({ msg, at: Date.now() });
+    if (this.pending.length > 20) this.pending.shift();
+    this.onMessage({ t: 'queued', kind: msg.t });
+    clearTimeout(this.pendingTimer);
+    this.pendingTimer = setTimeout(() => {
+      if (this.pending?.length) {
+        this.pending = [];
+        this.onMessage({ t: 'queueLost' });
+      }
+    }, 20_000);
+  }
+
+  flush() {
+    const list = this.pending || [];
+    this.pending = [];
+    clearTimeout(this.pendingTimer);
+    for (const { msg, at } of list) {
+      // Ход, пролежавший дольше времени на один ход, отправлять бессмысленно: сервер его отклонит
+      // по номеру шага, а игрок получит непонятную ошибку.
+      if (msg.t === 'action' && Date.now() - at > 20_000) continue;
+      this.send(msg);
+    }
+    if (list.length) this.onMessage({ t: 'queueSent', count: list.length });
+  }
+
+  canDeliver() {
+    if (this.mode === 'ws') return this.ws?.readyState === 1;
+    if (this.role === 'host') return true;
+    if (this.role === 'guest') return !!(this.conn && this.conn.open);
+    return true;
+  }
+
   send(msg) {
+    // Приветствие и выход осмысленны только сейчас, их копить незачем.
+    if (QUEUED_KINDS.has(msg.t) && !this.canDeliver()) { this.queue(msg); return; }
     if (this.mode === 'ws') { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(msg)); return; }
     if (msg.t === 'hello') this.hello = msg;
     if (this.role === 'host') { this.manager.handle(this.local, msg); return; }
@@ -223,6 +265,7 @@ export class Net {
           conn.send(this.hello);
           conn.send({ t: 'join', code });
           if (reconnecting) this.onMessage({ t: 'reconnected' });
+          this.flush();
           res();
         });
         conn.on('data', d => this.onMessage(d));

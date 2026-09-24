@@ -146,6 +146,15 @@ function onMessage(msg) {
     setBanner(null);
   } else if (msg.t === 'joinRetry') {
     toast(`Комната не отвечает, пробуем ещё раз (${msg.attempt} из 2)…`);
+  } else if (msg.t === 'queued') {
+    if (msg.kind === 'action') setBanner('Нет связи — ход отправится, как только она вернётся');
+    else toast('Нет связи, отправим как только восстановится');
+  } else if (msg.t === 'queueSent') {
+    setBanner(null);
+    toast('Связь вернулась, ход отправлен', true);
+  } else if (msg.t === 'queueLost') {
+    setBanner(null);
+    toast('Связь не восстановилась — ход не отправлен, попробуйте ещё раз');
   } else if (msg.t === 'hostState') {
     // Комната живёт, пока хост зарегистрирован на сигнальном сервере. Если регистрация слетела,
     // друг увидит «комната не найдена» — хозяину комнаты надо об этом сказать, а не молчать.
@@ -614,7 +623,8 @@ function lockIn(id) {
   const t = myTurn();
   if (!t) return;
   if (usedHeroes(S.room.draft).has(id)) { toast('Герой уже недоступен'); return; }
-  send({ t: 'action', hero: id });
+  // Номер шага защищает от хода, доехавшего с опозданием: к тому времени очередь уже другая.
+  send({ t: 'action', hero: id, step: t.index });
 }
 
 // The animated render has a transparent background, so it needs something behind it: the hero's own
@@ -709,10 +719,24 @@ function renderDraft() {
   const tl = $('#turn-label');
   if (turn) {
     const mine = myTurn();
-    const html = `${TEAM_NAME[turn.team]} · ${turn.type === 'ban' ? 'бан' : 'пик'}${mine ? '<span class="yours">ВАШ ХОД</span>' : ''}`;
+    // Чей ход и что он делает — самое важное на экране, поэтому сказано словом, а не только
+    // подсветкой слота: «ВАШ БАН» или «БАНЯТ СИЛЫ ТЬМЫ».
+    const act = turn.type === 'ban' ? 'БАН' : 'ПИК';
+    const html = mine
+      ? `<span class="yours">ВАШ ${act}</span>`
+      : `${turn.type === 'ban' ? 'БАНЯТ' : 'ПИКАЮТ'}<br>${TEAM_NAME[turn.team].toUpperCase()}`;
     if (tl.dataset.html !== html) { tl.dataset.html = html; tl.innerHTML = html; }
-    tl.className = 'turn-label ' + turn.team;
+    tl.className = 'turn-label ' + turn.team + (mine ? ' mine' : '');
   } else { tl.className = 'turn-label'; tl.textContent = ''; tl.dataset.html = ''; }
+
+  // Вся сторона, чей ход, подсвечивается целиком: ряд пиков, ряд банов и имя команды.
+  for (const team of ['radiant', 'dire']) {
+    $(`.team-side.${team}`).classList.toggle('acting', turn?.team === team);
+  }
+  const screen = $('#screen-draft');
+  screen.classList.toggle('turn-radiant', turn?.team === 'radiant');
+  screen.classList.toggle('turn-dire', turn?.team === 'dire');
+  screen.classList.toggle('turn-mine', !!myTurn());
 
   if (isNewStep) {
     S.lastStep = justStep;
