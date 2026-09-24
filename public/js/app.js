@@ -12,7 +12,7 @@ const S = {
   screen: null, selected: null, search: '', role: null,
   portraits: store('portraits') !== '0',
   resultView: null, lastStep: -1, lastTick: -1, pendingJoin: null, slotsKey: null,
-  chatLast: null, chatUnread: 0, hoverHint: null,
+  chatLast: null, chatRoom: null, chatUnread: 0, hoverHint: null,
   conn: { state: 'connecting', ms: null, lastPong: 0 }, lastJoin: null, version: null,
 };
 
@@ -165,6 +165,7 @@ function onMessage(msg) {
   } else if (msg.t === 'left') {
     S.room = null;
     S.chatLast = null;
+    S.chatRoom = null;
     S.resultView = null;
     history.replaceState(null, '', basePath);
     show('menu');
@@ -582,6 +583,14 @@ const chatLine = m => (m.sys
 // and the scroll position mid-sentence.
 function renderChat() {
   const r = S.room;
+  // Другая комната — другой разговор. Без этого старые строки остаются висеть в окне: история
+  // новой комнаты пуста, дописывать нечего, и код выходил раньше, чем успевал стереть прошлую.
+  if (S.chatRoom !== r.code) {
+    S.chatRoom = r.code;
+    S.chatLast = null;
+    clearChatUnread();
+    for (const log of $$('[data-chat] .chat-log')) log.innerHTML = '';
+  }
   let from = 0;
   if (S.chatLast) {
     const i = r.chat.findLastIndex(m => m.at === S.chatLast.at && m.text === S.chatLast.text);

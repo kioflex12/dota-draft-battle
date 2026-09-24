@@ -77,6 +77,9 @@ export class RoomManager {
 
   startMatch(room) {
     room.rematch.clear();
+    // Новая партия — чистый лист: разговор о прошлом драфте к новому отношения не имеет, а
+    // висел он до сих пор поверх новых сообщений.
+    room.chat.length = 0;
     const o = room.settings.order;
     if (o === 'coin') {
       const winner = Math.random() < 0.5 ? 'radiant' : 'dire';
