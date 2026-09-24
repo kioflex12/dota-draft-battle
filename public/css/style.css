@@ -587,6 +587,38 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .matrix th.rowh img { width: 44px; }
 .matrix td { width: 64px; height: 30px; text-align: center; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; border-radius: 3px; background: #0f131a; color: var(--muted); }
 .matrix td.self { background: transparent; }
+/* Кто кого переигрывает: портрет победителя, стрелка толщиной по величине, портрет проигравшего.
+   Голая таблица чисел отвечала на «сколько», но не показывала, кто кого и что из этого важно. */
+.duels { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.duel { display: grid; grid-template-columns: 72px 1fr 72px; align-items: center; gap: 10px; background: #10151c; border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; }
+.duel.r { color: var(--radiant-2); }
+.duel.d { color: var(--dire-2); }
+.duel .hero { width: 72px; height: 41px; object-fit: cover; border-radius: 3px; cursor: pointer; display: block; }
+.duel .side, .bond .side { display: flex; flex-direction: column; gap: 3px; cursor: pointer; min-width: 0; }
+.duel .side .nm, .bond .side .nm { font-size: 10.5px; line-height: 1.15; color: var(--muted); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.duel .side.win .nm { color: currentColor; }
+.duel .hero.win { box-shadow: 0 0 0 1px currentColor; }
+.duel .side.win .hero { box-shadow: 0 0 0 1px currentColor; }
+.duel .side.lose .hero { filter: grayscale(.75) brightness(.6); }
+.duel .hero.lose { filter: grayscale(.75) brightness(.6); }
+.duel .link { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.duel .val { font-family: var(--head); font-size: 15px; letter-spacing: .04em; }
+.duel .bar { position: relative; width: calc(100% - 10px); height: calc(2px + var(--w) * 5px); background: currentColor; border-radius: 2px; opacity: calc(.4 + var(--w) * .6); }
+.duel .bar::after { content: ''; position: absolute; right: -9px; top: 50%; transform: translateY(-50%); border-left: 10px solid currentColor; border-top: calc(4px + var(--w) * 3px) solid transparent; border-bottom: calc(4px + var(--w) * 3px) solid transparent; }
+.mx-toggle { float: right; background: none; border: 1px solid var(--line2); border-radius: 3px; color: var(--muted); font-family: var(--head); font-size: 11px; letter-spacing: .08em; padding: 1px 8px; cursor: pointer; }
+.mx-toggle:hover { color: var(--gold); border-color: var(--gold); }
+
+/* Связка: два портрета, соединённые линией со значением посередине. */
+.bonds { display: flex; flex-direction: column; gap: 6px; }
+.bond { display: grid; grid-template-columns: 72px 1fr 72px; align-items: center; gap: 8px; background: #10151c; border: 1px solid var(--line); border-radius: 5px; padding: 6px 9px; }
+.bond.good { color: var(--good); }
+.bond.bad { color: var(--bad); }
+.bond .hero { width: 72px; height: 41px; object-fit: cover; border-radius: 3px; cursor: pointer; display: block; }
+.bond.bad .hero { filter: grayscale(.45); }
+.bond .tie { position: relative; display: flex; align-items: center; justify-content: center; }
+.bond .tie::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: currentColor; opacity: .4; }
+.bond .tie b { position: relative; background: #10151c; padding: 0 7px; font-family: var(--head); font-size: 14px; }
+
 .matrix-wrap { overflow-x: auto; }
 .matrix-legend { text-align: center; color: var(--dim); font-size: 12px; margin-top: 8px; }
 .seg { display: inline-flex; background: #0f131a; border: 1px solid var(--line); border-radius: 4px; padding: 2px; }
@@ -594,6 +626,7 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .seg button.on { background: #262e3a; color: var(--text); }
 
 .chart svg { width: 100%; height: auto; display: block; }
+.winchart rect[data-tip] { cursor: crosshair; }
 .plan { background: #10151c; border: 1px solid var(--line); border-left-width: 3px; border-radius: 5px; padding: 10px 12px; }
 .plan.radiant { border-left-color: var(--radiant); }
 .plan.dire { border-left-color: var(--dire); }

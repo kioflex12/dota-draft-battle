@@ -17,7 +17,6 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
   const img = id => heroImg(H(id).key);
   const myTeam = you.team && room.mode !== 'local' ? you.team : null;
   let tab = 'summary';
-  let synSide = myTeam || 'radiant';
 
   // The engine guesses positions from pro data. The captain can restate them, and the whole
   // analysis — линии, штрафы за роль, состав — пересчитывается по заявленной раскладке.
@@ -187,64 +186,137 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
     return v > 0 ? `background:rgba(95,208,122,${0.08 + a * 0.28});color:#b7f5c4` : `background:rgba(239,100,80,${0.08 + a * 0.28});color:#ffc2b8`;
   };
 
-  const matchupsTab = () => {
+  // Матрица чисел отвечала на вопрос «сколько», но не показывала главного — кто кого и насколько
+  // это важно. Поэтому сначала идут сами противостояния портретами со стрелкой, а таблица
+  // остаётся вторым видом для тех, кому нужны все пары разом.
+  let mxTable = false;
+
+  const duelRow = c => {
+    const v = toPct(c.v);
+    const radiantWins = v >= 0;
+    const [win, lose] = radiantWins ? [c.a, c.b] : [c.b, c.a];
+    const mag = Math.min(1, Math.abs(v) / 6);
+    return `<div class="duel ${radiantWins ? 'r' : 'd'}" data-tip="<div class='tt-h'>${esc(H(win).name)} против ${esc(H(lose).name)}</div>${esc(H(win).name)} получает ${Math.abs(v).toFixed(1)}% к шансу победы в этой паре<br><span class='muted'>${pairSrc(c, H(c.a).name)}</span>">
+      <div class="side win" data-open="${win}"><img class="hero" src="${img(win)}" alt=""><span class="nm">${esc(H(win).name)}</span></div>
+      <div class="link">
+        <span class="val">${Math.abs(v).toFixed(1)}%</span>
+        <span class="bar" style="--w:${(0.2 + mag * 0.8).toFixed(2)}"></span>
+      </div>
+      <div class="side lose" data-open="${lose}"><img class="hero" src="${img(lose)}" alt=""><span class="nm">${esc(H(lose).name)}</span></div>
+    </div>`;
+  };
+
+  const bondRow = (s2, side) => {
+    const v = toPct(s2.v);
+    // Цвет говорит о пользе связки, а не о команде: команда и так понятна по колонке.
+    return `<div class="bond ${v < 0 ? 'bad' : 'good'}" data-tip="<div class='tt-h'>${esc(H(s2.a).name)} и ${esc(H(s2.b).name)}</div>${fmtPct(v)}% к шансу победы вместе<br><span class='muted'>${pairSrc(s2)}</span>">
+      <div class="side" data-open="${s2.a}"><img class="hero" src="${img(s2.a)}" alt=""><span class="nm">${esc(H(s2.a).name)}</span></div>
+      <span class="tie"><b>${fmtPct(v)}%</b></span>
+      <div class="side" data-open="${s2.b}"><img class="hero" src="${img(s2.b)}" alt=""><span class="nm">${esc(H(s2.b).name)}</span></div>
+    </div>`;
+  };
+
+  const counterMatrix = () => {
     const ctrMap = new Map(A.counters.map(c => [c.a + '-' + c.b, c]));
-    const synList = A.synergy[synSide];
-    const team = synSide === 'radiant' ? rad : dire;
-    const synMap = new Map(synList.flatMap(s => [[s.a + '-' + s.b, s], [s.b + '-' + s.a, s]]));
+    return `<div class="matrix-wrap"><table class="matrix">
+      <tr><th></th>${dire.map(h => `<th><img src="${img(h)}" data-tip="${esc(H(h).name)}" alt=""></th>`).join('')}</tr>
+      ${rad.map(a => `<tr><th class="rowh"><img src="${img(a)}" data-tip="${esc(H(a).name)}" alt=""></th>${dire.map(b => {
+        const c = ctrMap.get(a + '-' + b);
+        const v = toPct(c.v);
+        return `<td style="${cellColor(v)}" data-tip="<div class='tt-h'>${esc(H(a).name)} vs ${esc(H(b).name)}</div>${v >= 0 ? esc(H(a).name) : esc(H(b).name)} получает ${Math.abs(v).toFixed(1)}% к шансу победы<br><span class='muted'>${pairSrc(c, H(a).name)}</span>">${fmtPct(v)}</td>`;
+      }).join('')}</tr>`).join('')}
+    </table></div>
+    <div class="matrix-legend">Строки — Силы Света, столбцы — Силы Тьмы. Зелёный — выигрывает герой Сил Света, красный — героя Сил Тьмы.</div>`;
+  };
+
+  const matchupsTab = () => {
+    const duels = A.counters.slice().sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+    const strong = duels.filter(c => Math.abs(toPct(c.v)) >= 1).slice(0, 10);
+    const shown = strong.length ? strong : duels.slice(0, 6);
+    const synR = A.synergy.radiant.slice().sort((a, b) => b.v - a.v);
+    const synD = A.synergy.dire.slice().sort((a, b) => b.v - a.v);
+    const bonds = (list, side) => {
+      const best = list.slice(0, 3);
+      const worst = list[list.length - 1];
+      return best.map(x => bondRow(x, side)).join('') + (worst && toPct(worst.v) < -0.5 && !best.includes(worst) ? bondRow(worst, side) : '');
+    };
     return `
       <div class="panel">
-        <h4>Матрица контрпиков <span class="muted small" style="letter-spacing:0">строки — Силы Света, столбцы — Силы Тьмы</span></h4>
-        <div class="matrix-wrap"><table class="matrix">
-          <tr><th></th>${dire.map(h => `<th><img src="${img(h)}" data-tip="${esc(H(h).name)}" alt=""></th>`).join('')}</tr>
-          ${rad.map(a => `<tr><th class="rowh"><img src="${img(a)}" data-tip="${esc(H(a).name)}" alt=""></th>${dire.map(b => {
-            const c = ctrMap.get(a + '-' + b);
-            const v = toPct(c.v);
-            return `<td style="${cellColor(v)}" data-tip="<div class='tt-h'>${esc(H(a).name)} vs ${esc(H(b).name)}</div>${v >= 0 ? esc(H(a).name) : esc(H(b).name)} получает ${Math.abs(v).toFixed(1)}% к шансу победы в этой паре<br><span class='muted'>${pairSrc(c, H(a).name)}</span>">${fmtPct(v)}</td>`;
-          }).join('')}</tr>`).join('')}
-        </table></div>
-        <div class="matrix-legend">Зелёный — герой Сил Света переигрывает героя Сил Тьмы, красный — наоборот. Наведите на ячейку, чтобы увидеть, на чём основана оценка.</div>
+        <h4>Кто кого переигрывает <button class="mx-toggle" data-mx>${mxTable ? 'списком' : 'таблицей'}</button></h4>
+        ${mxTable ? counterMatrix() : `<div class="duels">${shown.map(duelRow).join('')}</div>
+        <div class="muted small">Стрелка ведёт от того, кто выигрывает пару, к тому, кого переигрывают; толщина — насколько сильно. Показаны самые весомые пары, остальные — в таблице.</div>`}
       </div>
       <div class="panel">
-        <h4>Матрица синергий <span class="seg" id="syn-seg"><button data-syn="radiant" class="${synSide === 'radiant' ? 'on' : ''}">Силы Света</button><button data-syn="dire" class="${synSide === 'dire' ? 'on' : ''}">Силы Тьмы</button></span></h4>
-        <div class="matrix-wrap"><table class="matrix">
-          <tr><th></th>${team.map(h => `<th><img src="${img(h)}" data-tip="${esc(H(h).name)}" alt=""></th>`).join('')}</tr>
-          ${team.map(a => `<tr><th class="rowh"><img src="${img(a)}" data-tip="${esc(H(a).name)}" alt=""></th>${team.map(b => {
-            if (a === b) return '<td class="self"></td>';
-            const s = synMap.get(a + '-' + b);
-            const v = toPct(s.v);
-            return `<td style="${cellColor(v)}" data-tip="<div class='tt-h'>${esc(H(a).name)} + ${esc(H(b).name)}</div>${fmtPct(v)}% к шансу победы вместе<br><span class='muted'>${pairSrc(s)}</span>">${fmtPct(v)}</td>`;
-          }).join('')}</tr>`).join('')}
-        </table></div>
+        <h4>Связки внутри команд</h4>
+        <div class="two-col">
+          <div><div class="sec-title" style="color:var(--radiant-2)">Силы Света</div><div class="bonds">${bonds(synR, 'radiant')}</div></div>
+          <div><div class="sec-title" style="color:var(--dire-2)">Силы Тьмы</div><div class="bonds">${bonds(synD, 'dire')}</div></div>
+        </div>
+        <div class="muted small">Насколько пара героев играет вместе лучше, чем поодиночке. Красная связка — мешают друг другу.</div>
       </div>`;
   };
 
+  // График вероятности победы сделан по образцу того, что рисует Dota Plus: сглаженная кривая,
+  // залитые области по обе стороны от середины и чистая ось. Ломаная с точками и частой сеткой
+  // читалась как технический график, а не как «чья игра».
   const chart = () => {
-    const W = 760, Hh = 260, pl = 86, pr = 16, pt = 16, pb = 30;
+    const W = 760, Hh = 300, pl = 92, pr = 18, pt = 26, pb = 34;
     const xs = A.curve.minutes, ys = A.curve.win.map(p => p * 100);
-    const minY = Math.min(35, ...ys.map(y => Math.floor(y / 5) * 5)), maxY = Math.max(65, ...ys.map(y => Math.ceil(y / 5) * 5));
+    const span = Math.max(12, ...ys.map(y => Math.abs(y - 50)));
+    const minY = 50 - span * 1.15, maxY = 50 + span * 1.15;
     const X = m => pl + (m - xs[0]) / (xs[xs.length - 1] - xs[0]) * (W - pl - pr);
     const Y = v => pt + (maxY - v) / (maxY - minY) * (Hh - pt - pb);
-    const path = ys.map((y, i) => `${i ? 'L' : 'M'}${X(xs[i]).toFixed(1)},${Y(y).toFixed(1)}`).join('');
-    const area = (above) => {
-      const pts = ys.map((y, i) => `${X(xs[i]).toFixed(1)},${Y(above ? Math.max(y, 50) : Math.min(y, 50)).toFixed(1)}`);
-      return `M${X(xs[0])},${Y(50)} L${pts.join(' L')} L${X(xs[xs.length - 1])},${Y(50)} Z`;
+    const pts = ys.map((y, i) => [X(xs[i]), Y(y)]);
+
+    // Сглаживание по Катмуллу-Рому: кривая идёт через все точки, без выбросов между ними.
+    const smooth = p => {
+      let d = `M${p[0][0].toFixed(1)},${p[0][1].toFixed(1)}`;
+      for (let i = 0; i < p.length - 1; i++) {
+        const p0 = p[i - 1] || p[i], p1 = p[i], p2 = p[i + 1], p3 = p[i + 2] || p[i + 1];
+        const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+        const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+        d += `C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+      }
+      return d;
     };
-    const grid = [];
-    // Read as one picture for both teams: the axis names whichever side is ahead at that height, so
-    // the same line is "60% Света" above the middle and "60% Тьмы" below it.
-    const axisText = v => (v === 50 ? 'поровну' : v > 50 ? `${v}% Света` : `${100 - v}% Тьмы`);
-    const axisFill = v => (v === 50 ? '#8b95a2' : v > 50 ? '#9be15d' : '#ff7a5c');
-    for (let v = minY; v <= maxY; v += 5) grid.push(`<line x1="${pl}" x2="${W - pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v === 50 ? '#fff6' : '#ffffff12'}" ${v === 50 ? 'stroke-dasharray="4 4"' : ''}/><text x="${pl - 8}" y="${Y(v) + 4}" fill="${axisFill(v)}" font-size="11" text-anchor="end">${axisText(v)}</text>`);
-    return `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Шанс победы обеих команд в зависимости от длительности матча">
-      ${grid.join('')}
-      ${xs.map(m => `<text x="${X(m)}" y="${Hh - 10}" fill="#8b95a2" font-size="11" text-anchor="middle">${m}'</text>`).join('')}
-      <path d="${area(true)}" fill="rgba(111,191,63,.18)"/>
-      <path d="${area(false)}" fill="rgba(214,80,58,.18)"/>
-      <path d="${path}" fill="none" stroke="#e3b45c" stroke-width="2.5"/>
-      ${ys.map((y, i) => `<circle cx="${X(xs[i])}" cy="${Y(y)}" r="3.5" fill="#e3b45c"><title>${xs[i]} мин — Силы Света ${y.toFixed(1)}%, Силы Тьмы ${(100 - y).toFixed(1)}%</title></circle>`).join('')}
-      <text x="${W - pr}" y="${pt + 10}" fill="#9be15d" font-size="12" text-anchor="end">↑ Силы Света</text>
-      <text x="${W - pr}" y="${Hh - pb - 6}" fill="#ff7a5c" font-size="12" text-anchor="end">↓ Силы Тьмы</text>
+    const line = smooth(pts);
+    const mid = Y(50);
+    const area = `${line} L${X(xs[xs.length - 1]).toFixed(1)},${mid.toFixed(1)} L${X(xs[0]).toFixed(1)},${mid.toFixed(1)} Z`;
+
+    const ticks = [];
+    for (let k = -1; k <= 1; k++) {
+      const v = 50 + k * Math.round(span * 0.8);
+      if (k === 0 || v <= maxY && v >= minY) ticks.push(v);
+    }
+    const axis = ticks.map(v => `<line x1="${pl}" x2="${W - pr}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="${v === 50 ? '#ffffff55' : '#ffffff10'}" stroke-width="${v === 50 ? 1.5 : 1}"/>
+      <text x="${pl - 10}" y="${(Y(v) + 4).toFixed(1)}" fill="${v === 50 ? '#8b95a2' : v > 50 ? '#9be15d' : '#ff7a5c'}" font-size="12" text-anchor="end">${v === 50 ? 'поровну' : (v > 50 ? Math.round(v) + '% Света' : Math.round(100 - v) + '% Тьмы')}</text>`).join('');
+
+    // Прозрачные полосы под курсор: подсказка показывает обе стороны на этой минуте.
+    const hit = xs.map((m, i) => {
+      const w = (W - pl - pr) / (xs.length - 1);
+      return `<rect x="${(X(m) - w / 2).toFixed(1)}" y="${pt}" width="${w.toFixed(1)}" height="${(Hh - pt - pb).toFixed(1)}" fill="transparent"
+        data-tip="<div class='tt-h'>${m}-я минута</div>Силы Света ${ys[i].toFixed(1)}% · Силы Тьмы ${(100 - ys[i]).toFixed(1)}%"/>`;
+    }).join('');
+
+    return `<svg viewBox="0 0 ${W} ${Hh}" class="winchart" role="img" aria-label="Вероятность победы обеих команд по ходу матча">
+      <defs>
+        <linearGradient id="wcR" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#6fbf3f" stop-opacity=".5"/><stop offset="1" stop-color="#6fbf3f" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="wcD" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0" stop-color="#d6503a" stop-opacity=".5"/><stop offset="1" stop-color="#d6503a" stop-opacity="0"/>
+        </linearGradient>
+        <clipPath id="wcAbove"><rect x="0" y="0" width="${W}" height="${mid.toFixed(1)}"/></clipPath>
+        <clipPath id="wcBelow"><rect x="0" y="${mid.toFixed(1)}" width="${W}" height="${(Hh - mid).toFixed(1)}"/></clipPath>
+      </defs>
+      ${axis}
+      <path d="${area}" fill="url(#wcR)" clip-path="url(#wcAbove)"/>
+      <path d="${area}" fill="url(#wcD)" clip-path="url(#wcBelow)"/>
+      <path d="${line}" fill="none" stroke="#eaf1f8" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${pts[pts.length - 1][0].toFixed(1)}" cy="${pts[pts.length - 1][1].toFixed(1)}" r="5" fill="#eaf1f8"/>
+      ${xs.filter((_, i) => i % 2 === 0).map((m, i, arr) => `<text x="${X(m).toFixed(1)}" y="${Hh - 12}" fill="#6b7480" font-size="12" text-anchor="middle">${m}${m === arr[arr.length - 1] ? ' мин' : ''}</text>`).join('')}
+      <text x="${W - pr}" y="${pt - 9}" font-size="13" text-anchor="end" font-weight="600"><tspan fill="#9be15d">↑ ведут Силы Света</tspan><tspan fill="#5c6572">   ·   </tspan><tspan fill="#ff7a5c">↓ ведут Силы Тьмы</tspan></text>
+      ${hit}
     </svg>`;
   };
 
@@ -394,8 +466,8 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
       root.querySelector('#res-body').innerHTML = body();
       return;
     }
-    const s = e.target.closest('[data-syn]');
-    if (s) { synSide = s.dataset.syn; root.querySelector('#res-body').innerHTML = body(); return; }
+    const mx = e.target.closest('[data-mx]');
+    if (mx) { mxTable = !mxTable; root.querySelector('#res-body').innerHTML = body(); return; }
     const o = e.target.closest('[data-open]');
     if (o) { onOpenHero(Number(o.dataset.open)); return; }
     const a = e.target.closest('[data-act]');
