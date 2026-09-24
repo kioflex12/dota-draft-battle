@@ -271,18 +271,46 @@ async function runNetTest() {
   box.hidden = false;
   const lines = [];
   const draw = () => { box.innerHTML = lines.map(l => `<div class="nt ${l.k}">${l.t}</div>`).join(''); };
-  const put = (k, t) => { lines.push({ k, t }); draw(); };
+  const put = (k, t) => { lines.push({ k, t }); draw(); return lines.length - 1; };
+  const set = (i, k, t) => { lines[i] = { k, t }; draw(); };
   lines.length = 0;
-  put('wait', 'Проверяем…');
 
-  // 1. Сервер комнат, если он настроен
-  const server = S.net?.serverUrl;
-  lines.length = 0;
-  if (server) put(S.net.mode === 'ws' ? 'ok' : 'bad', `Сервер комнат: ${S.net.mode === 'ws' ? 'подключён' : 'не отвечает'}`);
-  else put('warn', 'Сервер комнат не настроен — игра связывает браузеры напрямую');
+  // 1. Сервер комнат — отдельным подключением, а не пересказом индикатора: индикатор может
+  // показывать связь, установленную десять минут назад.
+  const url = S.net?.serverUrl;
+  let serverOk = false;
+  if (url) {
+    const i = put('wait', 'Сервер комнат: проверяем…');
+    const r = await probeRoomServer(url);
+    serverOk = r.ok;
+    set(i, r.ok ? 'ok' : 'bad', r.ok
+      ? `Сервер комнат отвечает, задержка ${r.ms} мс — ${r.ms < 150 ? 'отлично' : r.ms < 350 ? 'нормально' : 'медленно, но играть можно'}${r.slow ? '. Первый ответ занял ' + Math.round(r.open / 1000) + ' с: сервер просыпался после простоя' : ''}`
+      : `Сервер комнат не отвечает: ${r.error}`);
+  } else {
+    put('warn', 'Сервер комнат не настроен — игра пытается связать браузеры напрямую, а это работает не в каждой сети');
+  }
 
-  // 2. Сервер, который сводит игроков
-  put('wait', 'Сервер поиска игроков: проверяем…');
+  // 2. Свежесть страницы: открытая вкладка не перечитывает файлы сама, и человек может часами
+  // сидеть на версии со старыми ошибками.
+  try {
+    const res = await fetch(new URL('../version.json', import.meta.url), { cache: 'no-store' });
+    if (res.ok) {
+      const sha = (await res.json()).sha;
+      put(!S.version || sha === S.version ? 'ok' : 'warn', !S.version || sha === S.version
+        ? 'Версия игры свежая'
+        : 'Вкладка открыта на старой версии — обновите страницу (Ctrl+F5)');
+    }
+  } catch {}
+
+  if (serverOk) {
+    put('ok', 'Играть с друзьями можно: комнату держит сервер, обход NAT и ретранслятор для этого не нужны');
+    return;
+  }
+
+  // 3. Сюда доходим, только когда своего сервера нет или он молчит. Тогда остаётся связь
+  // напрямую, и вот у неё уже важны и сервер поиска игроков, и ретранслятор.
+  put('warn', 'Без сервера комнат остаётся связь напрямую между браузерами — проверяем, сложится ли она');
+  const iSig = put('wait', 'Сервер поиска игроков: проверяем…');
   let Peer = null;
   try { Peer = await S.net.peerLib(); } catch {}
   const sig = await new Promise(res => {
@@ -295,11 +323,9 @@ async function runNetTest() {
       p.on('error', e => { clearTimeout(timer); done(e.type || e.message); });
     } catch (e) { res(e.message); }
   });
-  lines.pop();
-  put(sig === 'ok' ? 'ok' : 'bad', `Сервер поиска игроков: ${sig === 'ok' ? 'доступен' : 'недоступен (' + sig + ')'}`);
+  set(iSig, sig === 'ok' ? 'ok' : 'bad', `Сервер поиска игроков: ${sig === 'ok' ? 'доступен' : 'недоступен (' + sig + ')'}`);
 
-  // 3. Виден ли внешний адрес и есть ли ретранслятор
-  put('wait', 'Обход NAT: проверяем…');
+  const iIce = put('wait', 'Обход NAT: проверяем…');
   const ice = await new Promise(res => {
     const kinds = {};
     const pc = new RTCPeerConnection({ iceServers: ICE_TEST });
@@ -312,12 +338,29 @@ async function runNetTest() {
     pc.createOffer().then(o => pc.setLocalDescription(o));
     setTimeout(() => { try { pc.close(); } catch {} res(kinds); }, 9000);
   });
-  lines.pop();
-  put(ice.srflx ? 'ok' : 'bad', `Внешний адрес виден: ${ice.srflx ? 'да' : 'нет'}`);
+  set(iIce, ice.srflx ? 'ok' : 'bad', `Внешний адрес виден: ${ice.srflx ? 'да' : 'нет'}`);
   put(ice.relay ? 'ok' : 'warn', ice.relay
     ? 'Ретранслятор доступен — соединение встанет даже через строгий NAT'
-    : 'Ретранслятора нет. Если прямое соединение между вашими сетями не проходит, игра не соединится — нужен свой сервер комнат');
-  draw();
+    : 'Ретранслятора нет: если сети игроков не пускают друг к другу напрямую, игра не соединится');
+}
+
+// Живая проба сервера комнат: открываем отдельное соединение и меряем ответ. На бесплатном
+// тарифе сервер засыпает, и первое подключение после простоя занимает до полуминуты — это не
+// поломка, поэтому ждём дольше и говорим об этом отдельно.
+function probeRoomServer(url) {
+  return new Promise(res => {
+    const t0 = Date.now();
+    let ws, open = 0;
+    const done = r => { try { ws.close(); } catch {} clearTimeout(timer); res(r); };
+    const timer = setTimeout(() => done({ ok: false, error: open ? 'не ответил на проверку' : 'не удалось подключиться за 40 секунд' }), 40000);
+    try { ws = new WebSocket(url); } catch (e) { return res({ ok: false, error: e.message }); }
+    ws.onopen = () => { open = Date.now() - t0; ws.send(JSON.stringify({ t: 'ping', at: Date.now() })); };
+    ws.onmessage = e => {
+      const m = JSON.parse(e.data);
+      if (m.t === 'pong') done({ ok: true, ms: Date.now() - m.at, open, slow: open > 3000 });
+    };
+    ws.onerror = () => done({ ok: false, error: 'сеть не пропускает соединение или адрес недоступен' });
+  });
 }
 
 function showJoinFail(reason) {
