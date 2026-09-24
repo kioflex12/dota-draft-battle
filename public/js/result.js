@@ -2,6 +2,9 @@ import { esc, heroImg, fmtPct, signCls } from './util.js';
 import { toPct, POS_NAMES, ROLE_KEYS, ROLE_NAMES } from '../shared/analysis.js';
 import { SEQUENCE, TEAM_NAME } from '../shared/draft.js';
 
+// Короткие формы для узкого элемента выбора: «Оффлейнер» в него не помещается.
+const POS_SHORT_ROLE = ['Керри', 'Мид', 'Оффлейн', 'Роумер', 'Саппорт'];
+
 const TABS = [
   ['summary', 'Итог'], ['lanes', 'Линии'], ['matchups', 'Матчапы'], ['phases', 'Стадии игры'],
   ['comp', 'Состав'], ['alts', 'Альтернативы'], ['order', 'Ход драфта'],
@@ -54,14 +57,15 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
         <div class="th"><b>${TEAM_NAME[side]}</b><span class="muted">${esc(name(side))}</span>${layout[side] ? `<button class="pos-reset" data-pos-auto="${side}">вернуть авто</button>` : ''}</div>
         <div class="team-heroes">
           ${order.map(p => `
-            <div class="th-hero" data-open="${p.hero}" data-tip="<div class='tt-h'>${esc(H(p.hero).name)}</div>Позиция ${p.pos + 1} (${POS_NAMES[p.pos]}) — ${Math.round(p.prob * 100)}% игр героя на этой роли">
-              <img src="${img(p.hero)}" alt="">
-              <select class="posn ${p.pen < 0 ? 'off' : ''}" data-pos-side="${side}" data-pos-idx="${p.idx}" title="Кто на какой позиции — можно поправить, разбор пересчитается">
-                ${POS_NAMES.map((n, v) => `<option value="${v}" ${v === p.pos ? 'selected' : ''}>${v + 1}</option>`).join('')}
+            <div class="th-hero">
+              <img src="${img(p.hero)}" data-open="${p.hero}" alt="">
+              <div class="nm" data-open="${p.hero}">${esc(H(p.hero).name)}</div>
+              <select class="posn ${p.pen < 0 ? 'off' : ''}" data-pos-side="${side}" data-pos-idx="${p.idx}" title="Поставьте позицию, на которой герой играл на самом деле — разбор пересчитается">
+                ${POS_SHORT_ROLE.map((n, v) => `<option value="${v}" ${v === p.pos ? 'selected' : ''}>${v + 1} · ${n}</option>`).join('')}
               </select>
-              <div class="nm">${esc(H(p.hero).name)}</div>
             </div>`).join('')}
         </div>
+        <div class="pos-hint muted small">Позиции и линии определены по про-статистике. Если играли иначе — поменяйте здесь, разбор пересчитается.</div>
       </div>`;
   };
 
@@ -283,7 +287,8 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
     const flags = c => `<ul class="flags">${c.flags.map(f => `<li class="${f.bad ? 'bad' : 'good'}">${esc(f.text)}</li>`).join('')}</ul>`;
     return `
       <div class="panel">
-        <h4><span style="color:var(--radiant-2)">Силы Света</span><span>Роли (сумма уровней Valve)</span><span style="color:var(--dire-2)">Силы Тьмы</span></h4>
+        <h4><span style="color:var(--radiant-2)">Силы Света</span><span>Чего в команде много, а чего не хватает</span><span style="color:var(--dire-2)">Силы Тьмы</span></h4>
+        <div class="muted small" style="margin:-4px 0 10px">Каждому герою Valve проставляет, насколько он подходит под роль — от нуля до трёх. Здесь эти оценки сложены по всей пятёрке: число слева от двоеточия — у Сил Света, справа — у Сил Тьмы.</div>
         <div class="comp-grid">${keys.map(k => `<div class="comp-row"><div class="l"><i style="width:${cr.roles[k] / max * 100}%"></i></div><div class="lbl">${ROLE_NAMES[k]} <span class="muted">${cr.roles[k]}:${cd.roles[k]}</span></div><div class="r"><i style="width:${cd.roles[k] / max * 100}%"></i></div></div>`).join('')}</div>
       </div>
       <div class="two-col">

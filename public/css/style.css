@@ -355,6 +355,7 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .hcell.hover-d { box-shadow: 0 0 0 2px var(--dire), 0 0 14px rgba(214, 80, 58, .5); z-index: 2; }
 
 /* ---------- side panel ---------- */
+.panel-close { display: none; }
 .side-panel { border-left: 1px solid var(--line); background: linear-gradient(180deg, #121720, #0c1016); display: flex; flex-direction: column; min-height: 0; }
 .hero-panel { flex: 1; overflow-y: auto; min-height: 0; }
 .empty-panel { color: var(--dim); padding: 40px 24px; text-align: center; }
@@ -519,14 +520,19 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .res-team .th { display: flex; justify-content: space-between; font-family: var(--head); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
 .res-team.radiant .th b { color: var(--radiant-2); } .res-team.dire .th b { color: var(--dire-2); }
 .team-heroes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
-.th-hero { position: relative; border-radius: 3px; overflow: hidden; cursor: pointer; }
+.th-hero { position: relative; border-radius: 3px; }
+.th-hero img, .th-hero .nm { cursor: pointer; }
 .th-hero img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; }
-/* The position badge is a chooser: the captain restates who plays where and the analysis follows. */
-.th-hero .posn { position: absolute; right: 3px; bottom: 22px; background: #000c; color: var(--text); font-family: var(--head); font-size: 12px; line-height: 1.5; padding: 0 2px 0 5px; border: 1px solid var(--line2); border-radius: 2px; cursor: pointer; appearance: none; }
+/* Выбор позиции раньше был цифрой в углу карточки — его никто не находил. Теперь это явный
+   элемент управления под именем героя, с названием роли и видимой стрелкой. */
+.th-hero .posn { display: block; width: 100%; margin-top: 3px; padding: 4px 20px 4px 6px; background: #0f141b; color: var(--text); font-family: var(--body); font-size: 11.5px; line-height: 1.3; border: 1px solid var(--line2); border-radius: 3px; cursor: pointer; appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 52%, calc(100% - 7px) 52%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 .th-hero .posn:hover { border-color: var(--gold); color: var(--gold); }
-.th-hero .posn:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
-.th-hero .posn.off { background: var(--bad); border-color: var(--bad); }
+.th-hero .posn:focus-visible { outline: none; border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+.th-hero .posn.off { border-color: var(--bad); color: #ffc2b8; }
 .th-hero .posn option { background: var(--panel); color: var(--text); }
+.pos-hint { margin-top: 8px; line-height: 1.4; }
 .pos-reset { background: none; border: 1px solid var(--line2); border-radius: 2px; color: var(--muted); font-family: var(--head); font-size: 11px; letter-spacing: .08em; padding: 0 6px; cursor: pointer; }
 .pos-reset:hover { color: var(--gold); border-color: var(--gold); }
 .th-hero .nm { font-size: 11px; text-align: center; padding: 3px 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -694,7 +700,16 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
   .team-side.dire .bans, .team-side.dire .team-stack { align-items: flex-start; justify-content: flex-start; }
   .order-strip { flex-wrap: wrap; justify-content: center; }
   .draft-body { grid-template-columns: 1fr; }
-  .side-panel { border-left: 0; border-top: 1px solid var(--line); }
+  /* Панель героя — отдельный экран поверх всего, а не хвост под сеткой. */
+  .side-panel { position: fixed; inset: 0; z-index: 60; border: 0; background: var(--bg); display: none; overflow-y: auto; }
+  body.hero-sheet .side-panel { display: flex; }
+  /* Пока карточка открыта, кнопка действия есть в ней самой — нижняя полоса дублировала бы её. */
+  body.hero-sheet .touch-bar { display: none; }
+  body.hero-sheet { overflow: hidden; }
+  .panel-close { display: block; position: fixed; right: 10px; top: 10px; z-index: 62; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line2); background: rgba(10, 13, 18, .9); color: var(--text); font-size: 18px; line-height: 1; cursor: pointer; }
+  body:not(.hero-sheet) .panel-close { display: none; }
+  .side-panel .draft-chat { display: none; }
+  .hero-panel { padding-bottom: 80px; }
   .hero-grid { overflow: visible; padding-bottom: 76px; }
   /* Фильтры ролей в одну прокручиваемую строку — двумя рядами они отнимают место у сетки. */
   .role-filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }

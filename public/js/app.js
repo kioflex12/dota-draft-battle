@@ -85,6 +85,7 @@ async function boot() {
 function show(name) {
   if (S.screen === name) return;
   S.screen = name;
+  openHeroSheet(false);
   queueMicrotask(() => setConn());
   $$('.screen').forEach(s => s.classList.toggle('hidden', s.id !== 'screen-' + name));
   window.scrollTo(0, 0);
@@ -546,6 +547,8 @@ function bindDraft() {
     applyGridFilter();
   });
   $('#touch-bar').addEventListener('click', e => { if (e.target.closest('[data-act]') && S.selected != null) lockIn(S.selected); });
+  $('#panel-close').addEventListener('click', () => openHeroSheet(false));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') openHeroSheet(false); });
   // В режиме без сервера комнату держит вкладка её создателя: закрыл — игра у всех оборвалась.
   addEventListener('beforeunload', e => {
     const r = S.room;
@@ -562,6 +565,13 @@ function bindDraft() {
     $$('.pick-slot').forEach(s => { s.dataset.hero = ''; });
     if (S.room?.draft) renderDraft();
   });
+}
+
+// На телефоне боковой панели нет: карточка героя открывается поверх всего экрана. Иначе сведения
+// о герое лежали бы под всей сеткой, и до них надо было прокручивать.
+const isNarrow = () => matchMedia('(max-width: 860px)').matches;
+function openHeroSheet(on) {
+  document.body.classList.toggle('hero-sheet', !!on && isNarrow());
 }
 
 function moveSelection(dir) {
@@ -632,6 +642,7 @@ function selectHero(id) {
   $(`.hcell[data-hero="${id}"]`)?.classList.add('sel');
   renderHeroPanelFor(id);
   renderTouchBar();
+  openHeroSheet(true);
   send({ t: 'hover', hero: id });
 }
 
@@ -681,6 +692,7 @@ function lockButtonHtml(id) {
 function lockIn(id) {
   const t = myTurn();
   if (!t) return;
+  openHeroSheet(false);
   if (usedHeroes(S.room.draft).has(id)) { toast('Герой уже недоступен'); return; }
   // Номер шага защищает от хода, доехавшего с опозданием: к тому времени очередь уже другая.
   send({ t: 'action', hero: id, step: t.index });
