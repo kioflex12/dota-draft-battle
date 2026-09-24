@@ -44,6 +44,11 @@ const DECIDE = 0.7;
 const WIN_SCALE = 0.45;
 // Перевод сырой суммы сразу в шкалу вероятности.
 const CAL = DECIDE * WIN_SCALE;
+// Свет выигрывает чаще Тьмы при одинаковых составах — из-за самой карты, а не драфта. Замерено
+// трижды и сходится: +0.117 в отдельной подгонке по 1.3 млн матчей Divine+, +0.134 и +0.098 в
+// проверках калибровки. Драфта это не касается, поэтому в вердикте о составах слагаемое не
+// участвует — только в шансе победы, где ему и место.
+const SIDE_EDGE = 0.117;
 // Насколько сильно риск ответного пика опускает кандидата. Подобрано так, чтобы он разводил
 // близких по силе героев, но не перевешивал реальную выгоду от пика.
 const RISK_WEIGHT = 0.8;
@@ -561,7 +566,12 @@ export function createEngine(heroList, stats, stratz = null) {
     const compR = composition(rad, ra.pos), compD = composition(dire, da.pos);
     const cr = curve(rad), cd = curve(dire);
     const components = Object.fromEntries(Object.entries({ heroes: heroBase, synergy: synR - synD, counters, lanes: laneLogit, positions, composition: compR.adj - compD.adj }).map(([k, v]) => [k, v * CAL]));
+    // Перевес стороны уже в шкале вероятности, калибровкой его умножать не на что.
+    components.side = SIDE_EDGE;
     const total = sum(Object.values(components));
+    // Отдельно — то, что решил именно драфт: вердикт о составах не должен зависеть от того, кому
+    // досталась сторона.
+    const draftTotal = total - components.side;
     const phaseShift = diff => clamp(diff * PHASE_WEIGHT, -0.8, 0.8);
     // Линии тянут раннюю игру и почти не влияют на позднюю; берём уже откалиброванное слагаемое
     // (components.lanes), а не сырое, иначе часть перевеса осталась бы стоять плоско.
@@ -581,7 +591,7 @@ export function createEngine(heroList, stats, stratz = null) {
     const powerSpikes = side => (side === 'radiant' ? rad : dire).map(h => ({ hero: h, early: (phaseAt(h, 16) + phaseAt(h, 22.5)) / 2, late: (phaseAt(h, 47.5) + phaseAt(h, 55)) / 2 }));
 
     return {
-      prob: sig(total), total, components,
+      prob: sig(total), total, draftTotal, draftProb: sig(draftTotal), components,
       lanes, positions: { radiant: posR, dire: posD },
       synergy: synPairs, counters: ctrPairs,
       composition: { radiant: compR, dire: compD },

@@ -28,8 +28,10 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
     alts = engine.alternatives(d, { posRadiant: layout.radiant, posDire: layout.dire });
     pR = A.prob * 100;
     pD = 100 - pR;
-    favored = pR >= 50 ? 'radiant' : 'dire';
-    margin = Math.abs(pR - 50);
+    favored = A.draftProb >= 0.5 ? 'radiant' : 'dire';
+    // Вердикт — о драфте, поэтому перевес стороны из него вычтен: он к составам отношения не
+    // имеет. В самом шансе победы он остаётся, там ему и место.
+    margin = Math.abs(A.draftProb * 100 - 50);
     // Шанс победы переведён по замеру на реальных матчах, поэтому сами числа небольшие: драфт
     // решает исход куда слабее, чем кажется. Чтобы «перевес 6%» читался, рядом идёт мерка —
     // какая доля живых драфтов слабее этого.
@@ -71,6 +73,7 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
     const rows = [
       ['lanes', 'Линии'], ['counters', 'Контрпики'], ['synergy', 'Синергия'],
       ['heroes', 'Сила героев в патче'], ['positions', 'Позиции'], ['composition', 'Состав команды'],
+      ['side', 'Сторона Света (не драфт)'],
     ].map(([k, l]) => ({ k, l, v: toPct(A.components[k]) })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
     const max = Math.max(4, ...rows.map(r => Math.abs(r.v)));
     const big = rows.filter(r => Math.abs(r.v) >= 1);
@@ -82,7 +85,8 @@ export function renderResult(root, { engine, room, you, onRematch, onMenu, onOpe
       const w = Math.abs(v) / max * 50;
       return `<div class="contrib-row"><span class="lbl">${l}</span><div class="ct"><i style="${v >= 0 ? 'left:50%' : `left:${50 - w}%`};width:${w}%;background:${v >= 0 ? 'var(--radiant)' : 'var(--dire)'}"></i></div><span class="num ${signCls(v)}">${fmtPct(v)}%</span></div>`;
     }).join('')}</div>
-    <div class="muted small" style="margin-top:8px">Полоска вправо — в пользу Сил Света, влево — в пользу Сил Тьмы. Число — на сколько процентов эта часть драфта сдвигает шанс победы.</div>`;
+    <div class="muted small" style="margin-top:8px">Полоска вправо — в пользу Сил Света, влево — в пользу Сил Тьмы. Число — на сколько процентов эта часть драфта сдвигает шанс победы.
+    «Сторона Света» — не про драфт: Свет выигрывает чаще при одинаковых составах, это свойство карты. В вердикте о драфтах это слагаемое не участвует.</div>`;
   };
 
   const insights = () => `<div class="insights">${A.insights.map(i => `
