@@ -441,6 +441,22 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 .sec-title { font-family: var(--head); letter-spacing: .15em; text-transform: uppercase; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
 
 /* ---------- tooltip / toast / modal ---------- */
+/* Индикатор связи: виден всегда, но не мешает — маленький, в углу, поверх экранов. */
+.conn { position: fixed; right: 10px; top: 8px; z-index: 55; display: flex; align-items: center; gap: 7px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 20px; background: rgba(10, 13, 18, .85); backdrop-filter: blur(4px); font-size: 12px; color: var(--muted); white-space: nowrap; pointer-events: auto; }
+.conn[hidden] { display: none; }
+/* В свёрнутом виде (экран драфта) индикатор уходит в нижний левый угол: верхний занят блоками
+   команд, а внизу слева он не закрывает ни сетку героев, ни панель действия. */
+.conn.compact { padding: 5px; border-radius: 50%; top: auto; bottom: 10px; right: auto; left: 10px; }
+.conn.compact .txt { display: none; }
+.conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+.conn.ok .dot { background: var(--good); box-shadow: 0 0 8px rgba(95, 208, 122, .7); }
+.conn.ok { color: #9fb6a6; }
+.conn.warn .dot { background: var(--gold); animation: blink 1.2s ease-in-out infinite; }
+.conn.warn { color: var(--gold); border-color: rgba(227, 180, 92, .5); }
+.conn.bad .dot { background: var(--bad); }
+.conn.bad { color: #ffb3a7; border-color: rgba(239, 100, 80, .6); }
+.conn.wait .dot { background: var(--muted); animation: blink 1.2s ease-in-out infinite; }
+
 .banner { position: fixed; left: 50%; top: 0; transform: translateX(-50%); z-index: 60; max-width: min(720px, 94vw); padding: 8px 18px; border: 1px solid var(--bad); border-top: 0; border-radius: 0 0 6px 6px; background: #2a1512; color: #ffd9d2; font-size: 14px; text-align: center; box-shadow: 0 6px 20px rgba(0, 0, 0, .6); }
 .banner[hidden] { display: none; }
 
@@ -683,6 +699,8 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
   .grid-tools { gap: 6px; }
   .grid-wrap { padding: 8px 10px; gap: 6px; }
   /* Pinned action bar: on a phone the panel with the button is below the entire grid. */
+  .conn { right: 6px; top: 4px; padding: 3px 8px; font-size: 11px; }
+  .conn.compact { bottom: 84px; left: 8px; }
   .touch-bar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; gap: 10px; align-items: center; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: linear-gradient(180deg, #151b24, #0b0f15); border-top: 1px solid var(--line2); box-shadow: 0 -8px 24px rgba(0, 0, 0, .6); }
   .touch-bar[hidden] { display: none; }
   .touch-bar img { width: 40px; height: 46px; object-fit: cover; border-radius: 3px; }

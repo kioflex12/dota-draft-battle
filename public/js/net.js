@@ -107,12 +107,17 @@ export class Net {
     const target = url || this.serverUrl;
     const ws = new WebSocket(target || ((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'));
     let opened = false;
-    ws.onopen = () => { opened = true; this.mode = 'ws'; this.ws = ws; this.onOpen(); this.flush(); };
-    ws.onmessage = e => this.onMessage(JSON.parse(e.data));
+    ws.onopen = () => { opened = true; this.mode = 'ws'; this.ws = ws; this.onOpen(); this.flush(); this.startPing(); };
+    ws.onmessage = e => {
+      const m = JSON.parse(e.data);
+      if (m.t === 'pong') { this.onMessage({ t: 'netPing', ms: Date.now() - m.at }); return; }
+      this.onMessage(m);
+    };
     ws.onerror = () => {};
     ws.onclose = () => {
       if (!opened && first) { this.startP2P(); return; }
       this.ws = null;
+      clearInterval(this.pingTimer);
       this.onMessage({ t: 'disconnected' });
       setTimeout(() => this.connectWs(false), 1500);
     };
@@ -121,6 +126,14 @@ export class Net {
   startP2P() {
     this.mode = 'p2p';
     this.onOpen();
+  }
+
+  // Задержка до сервера комнат. Для связи напрямую её меряет сердцебиение канала.
+  startPing() {
+    clearInterval(this.pingTimer);
+    const beat = () => { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'ping', at: Date.now() })); };
+    beat();
+    this.pingTimer = setInterval(beat, 10000);
   }
 
   // Пока связь моргает, отправлять некуда. Раньше сообщение в этот момент просто пропадало:
@@ -208,6 +221,7 @@ export class Net {
 
   teardown(emitLeft) {
     clearInterval(this.beat);
+    clearInterval(this.pingTimer);
     this.stopHostWatch();
     this.manager?.destroy();
     try { this.conn?.close(); } catch {}
@@ -248,7 +262,10 @@ export class Net {
     this.peer.on('connection', conn => {
       const client = this.manager.createClient();
       client.conn = conn;
-      conn.on('data', d => { if (d && d.t === 'ping') return; try { this.manager.handle(client, d); } catch (e) { console.error(e); } });
+      conn.on('data', d => {
+        if (d && d.t === 'ping') { try { conn.send({ t: 'pong', at: d.at }); } catch {} return; }
+        try { this.manager.handle(client, d); } catch (e) { console.error(e); }
+      });
       conn.on('close', () => this.manager?.leave(client));
       conn.on('error', () => this.manager?.leave(client));
     });
@@ -321,7 +338,11 @@ export class Net {
           this.flush();
           res();
         });
-        conn.on('data', d => { if (d && d.t === 'ping') return; this.onMessage(d); });
+        conn.on('data', d => {
+          if (d && d.t === 'pong') { this.onMessage({ t: 'netPing', ms: Date.now() - d.at }); return; }
+          if (d && d.t === 'ping') return;
+          this.onMessage(d);
+        });
         this.startHeartbeat(conn);
         // Обрыв не означает, что хост ушёл насовсем: у него могло моргнуть подключение. Сначала
         // пробуем вернуться в ту же комнату и только потом сдаёмся — иначе партия теряется зря.
@@ -341,9 +362,10 @@ export class Net {
   // пытался сходить. Редкий пинг держит канал живым и обнаруживает разрыв заранее.
   startHeartbeat(conn) {
     clearInterval(this.beat);
+    try { conn.send({ t: 'ping', at: Date.now() }); } catch {}
     this.beat = setInterval(() => {
       if (!conn.open) { clearInterval(this.beat); return; }
-      try { conn.send({ t: 'ping' }); } catch {}
+      try { conn.send({ t: 'ping', at: Date.now() }); } catch {}
     }, 15000);
   }
 

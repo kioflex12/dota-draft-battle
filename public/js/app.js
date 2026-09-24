@@ -13,6 +13,7 @@ const S = {
   portraits: store('portraits') !== '0',
   resultView: null, lastStep: -1, lastTick: -1, pendingJoin: null, slotsKey: null,
   chatLast: null, chatUnread: 0, hoverHint: null,
+  conn: { state: 'connecting', ms: null, lastPong: 0 },
 };
 
 const token = store('token') || (() => { const t = Math.random().toString(36).slice(2) + Date.now().toString(36); store('token', t); return t; })();
@@ -75,6 +76,8 @@ async function boot() {
   const code = codeFromLocation();
   if (code && /^[A-Z0-9]{5}$/i.test(code)) S.pendingJoin = code.toUpperCase();
   connect();
+  setConn('connecting');
+  watchConnLiveness();
   show('menu');
   setInterval(tick, 200);
 }
@@ -82,6 +85,7 @@ async function boot() {
 function show(name) {
   if (S.screen === name) return;
   S.screen = name;
+  queueMicrotask(() => setConn());
   $$('.screen').forEach(s => s.classList.toggle('hidden', s.id !== 'screen-' + name));
   window.scrollTo(0, 0);
 }
@@ -110,6 +114,7 @@ function connect() {
       $('#net-label').textContent = S.net.mode === 'p2p'
         ? 'Сеть: напрямую между браузерами (WebRTC). Комната живёт, пока открыта вкладка её создателя.'
         : 'Сеть: сервер комнат.';
+      setConn('ok');
       send({ t: 'hello', name: myName(), token });
       const code = S.pendingJoin || S.room?.code;
       if (code) { send({ t: 'join', code }); S.pendingJoin = null; }
@@ -139,25 +144,35 @@ function onMessage(msg) {
     show('menu');
   } else if (msg.t === 'hover') {
     showHover(msg.team, msg.hero);
+  } else if (msg.t === 'netPing') {
+    S.conn.lastPong = Date.now();
+    // Порог взят с запасом: до трети секунды драфт ощущается живым.
+    setConn(msg.ms > 350 ? 'slow' : 'ok', msg.ms);
   } else if (msg.t === 'disconnected') {
+    setConn('retry');
     if (S.room) toast('Соединение потеряно, переподключение…');
   } else if (msg.t === 'reconnected') {
+    setConn('ok');
     toast('Соединение восстановлено', true);
     setBanner(null);
   } else if (msg.t === 'joinRetry') {
     toast(`Комната не отвечает, пробуем ещё раз (${msg.attempt} из 2)…`);
   } else if (msg.t === 'queued') {
+    setConn('waiting');
     if (msg.kind === 'action') setBanner('Нет связи — ход отправится, как только она вернётся');
     else toast('Нет связи, отправим как только восстановится');
   } else if (msg.t === 'queueSent') {
+    setConn('ok');
     setBanner(null);
     toast('Связь вернулась, ход отправлен', true);
   } else if (msg.t === 'queueLost') {
+    setConn('lost');
     setBanner(null);
     toast('Связь не восстановилась — ход не отправлен, попробуйте ещё раз');
   } else if (msg.t === 'hostState') {
     // Комната живёт, пока хост зарегистрирован на сигнальном сервере. Если регистрация слетела,
     // друг увидит «комната не найдена» — хозяину комнаты надо об этом сказать, а не молчать.
+    setConn(msg.online ? 'ok' : 'retry');
     setBanner(msg.online ? null : 'Связь с сервером комнат потеряна — друг сейчас не сможет войти. Восстанавливаем…');
   }
 }
@@ -173,6 +188,47 @@ function showHover(team, hero) {
   S.hoverHint = { el };
 }
 
+// Индикатор связи виден на всех экранах: как соединены, жива ли связь и какая задержка. Раньше
+// о состоянии сети можно было узнать только по строке в подвале меню и по всплывающим сообщениям.
+const CONN_TEXT = {
+  connecting: () => ['wait', 'Соединение…'],
+  ok: () => {
+    const how = S.net?.mode === 'p2p' ? (S.net?.role === 'host' ? 'Напрямую · вы держите комнату' : 'Напрямую') : 'Сервер комнат';
+    return ['ok', S.conn.ms != null ? `${how} · ${S.conn.ms} мс` : how];
+  },
+  slow: () => ['warn', `Связь медленная · ${S.conn.ms} мс`],
+  retry: () => ['warn', 'Связь потеряна, восстанавливаем…'],
+  waiting: () => ['warn', 'Нет связи — ход ждёт отправки'],
+  lost: () => ['bad', 'Связи нет'],
+};
+
+function setConn(state, ms) {
+  if (ms != null) S.conn.ms = ms;
+  if (state) S.conn.state = state;
+  const el = $('#conn');
+  const [cls, text] = (CONN_TEXT[S.conn.state] || CONN_TEXT.connecting)();
+  el.hidden = false;
+  // На экране драфта место в углу занято блоком команды, поэтому в спокойном состоянии индикатор
+  // сворачивается в точку, а текст возвращается, когда со связью что-то не так.
+  const compact = S.screen === 'draft' && (S.conn.state === 'ok' || S.conn.state === 'connecting');
+  el.className = 'conn ' + cls + (compact ? ' compact' : '');
+  el.querySelector('.txt').textContent = text;
+  el.dataset.tip = S.net?.mode === 'p2p'
+    ? 'Игроки соединены напрямую через браузеры. Комната живёт, пока открыта вкладка её создателя.'
+    : 'Игра идёт через сервер комнат — так надёжнее, чем напрямую.';
+}
+
+// Пропавший интернет не закрывает сокет сразу: страница может минуту считать, что всё хорошо.
+// Поэтому связь считается живой, только пока приходят ответы на пинг.
+function watchConnLiveness() {
+  const expectsPong = () => S.net && (S.net.mode === 'ws' || (S.net.mode === 'p2p' && S.net.role === 'guest'));
+  setInterval(() => {
+    if (!expectsPong() || !S.conn.lastPong) return;
+    const quiet = Date.now() - S.conn.lastPong;
+    if (quiet > 25000 && S.conn.state !== 'retry' && S.conn.state !== 'lost' && S.conn.state !== 'waiting') setConn('retry');
+  }, 2000);
+}
+
 function setBanner(text) {
   const el = $('#banner');
   el.textContent = text || '';
@@ -181,6 +237,9 @@ function setBanner(text) {
 
 function renderRoom(prev) {
   const r = S.room;
+  // Роль в режиме «напрямую» становится известна уже после подключения, а задержка — после
+  // первого обмена. Перерисовываем индикатор вместе с комнатой, чтобы текст не оставался старым.
+  setConn();
   renderChat();
   if (r.phase === 'lobby') { renderLobby(); show('lobby'); return; }
   if (r.phase === 'coin') { renderCoin(prev); show('coin'); return; }

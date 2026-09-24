@@ -271,6 +271,10 @@ export class RoomManager {
   handle(client, msg) {
     const room = client.room;
     switch (msg.t) {
+      // Замер задержки: клиент показывает её в индикаторе связи.
+      case 'ping':
+        this.send(client, { t: 'pong', at: msg.at });
+        break;
       case 'hello':
         client.name = String(msg.name || 'Игрок').slice(0, 20) || 'Игрок';
         client.token = String(msg.token || '').slice(0, 64);
