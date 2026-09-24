@@ -98,7 +98,7 @@ while (currentTurn(botRoom.draft)) {
   else { applyAction(botRoom.draft, t.team, hero); manager.afterAction(botRoom); }
   clearTimeout(botRoom.botTimer);
 }
-check(botRoom.phase === 'lanes' || botRoom.phase === 'done', 'в игре с ботом этап линий тоже есть');
+check(botRoom.phase === 'lanes', 'в игре с ботом этап линий тоже есть, а не сразу разбор');
 check(botRoom.lanesReady.includes(c.team === 'radiant' ? 'dire' : 'radiant'), 'бот расставил линии сам');
 
 // Ушедший капитан не держит комнату: по истечении срока раскладка ставится по про-статистике.

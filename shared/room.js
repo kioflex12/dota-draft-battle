@@ -5,6 +5,8 @@ const ORDERS = ['random', 'radiant', 'dire', 'coin'];
 // вечно: по истечении срока за него ставится раскладка по про-статистике.
 const LANES_TIME = 90_000;
 const DEFAULT_SETTINGS = { order: 'random', timers: true, randomBan: false, firstBanTime: 15, turnTime: 30, reserve: 130 };
+// Возможности сервера комнат — по ним страница понимает, не отстал ли он от неё.
+export const FEATURES = ['lanes'];
 const TEAM_LABEL = { radiant: 'Силы Света', dire: 'Силы Тьмы' };
 const COIN_LABEL = { first: 'первый пик', second: 'второй пик', radiant: 'Силы Света', dire: 'Силы Тьмы' };
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -318,7 +320,20 @@ export class RoomManager {
     let team = null;
     for (const t of ['radiant', 'dire']) {
       const s = room.seats[t];
-      if (s && !s.bot && !s.client && s.token && s.token === client.token) { team = t; break; }
+      if (!s || s.bot || !s.token || s.token !== client.token) continue;
+      // Место возвращается по токену — он и есть удостоверение игрока. Прежнее соединение при
+      // этом может быть ещё не закрыто: обрыв на телефоне или спящая вкладка молчат, а сервер
+      // узнаёт об этом лишь через десятки секунд. Раньше такое место считалось занятым, игрок
+      // возвращался зрителем и видел чужой ход там, где ходить должен был сам.
+      if (s.client && s.client !== client) {
+        const stale = s.client;
+        stale.team = null;
+        stale.room = null;
+        room.clients.delete(stale);
+        this.send(stale, { t: 'error', error: 'Вы подключились из другого места — это соединение больше не используется' });
+      }
+      team = t;
+      break;
     }
     if (!team && room.phase === 'lobby') {
       team = wantTeam && !room.seats[wantTeam] ? wantTeam : (!room.seats.radiant ? 'radiant' : !room.seats.dire ? 'dire' : null);
@@ -361,7 +376,10 @@ export class RoomManager {
       case 'hello':
         client.name = String(msg.name || 'Игрок').slice(0, 20) || 'Игрок';
         client.token = String(msg.token || '').slice(0, 64);
-        this.send(client, { t: 'hello', id: client.id });
+        // Что этот сервер умеет. Страница обновляется сама, а сервер комнат — руками, и они
+        // разъезжаются: новый экран есть в игре, а комната о нём не знает и молча ведёт себя
+        // по-старому. Пусть игрок видит причину, а не пропавший шаг.
+        this.send(client, { t: 'hello', id: client.id, features: FEATURES });
         break;
       case 'create': {
         const r = this.createRoom({ ...msg, mode: ['bot', 'local'].includes(msg.mode) ? msg.mode : 'pvp' });

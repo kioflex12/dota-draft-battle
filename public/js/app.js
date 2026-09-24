@@ -154,6 +154,14 @@ const joinRoom = code => {
 const myName = () => ($('#name-input').value.trim() || 'Капитан').slice(0, 20);
 
 function onMessage(msg) {
+  if (msg.t === 'hello') {
+    // Сервер комнат живёт отдельно от страницы и обновляется руками. Если он старее игры,
+    // часть шагов молча пропадает — например расстановка линий. Лучше сказать прямо.
+    S.serverFeatures = msg.features || [];
+    if (S.net?.mode === 'ws' && !S.serverFeatures.includes('lanes')) {
+      setBanner('Сервер комнат работает на старой версии: расстановки линий не будет, разбор откроется сразу. Обновите сервер.');
+    }
+  }
   if (msg.t === 'room') {
     S.lastJoin = null;
     const prev = S.room;

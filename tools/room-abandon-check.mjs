@@ -97,6 +97,23 @@ check(steps() === before, 'отсчёт идёт от повторного об�
 manager.coverAbandonedTurn(room, t1 + 115_000);
 check(steps() === before + 1, 'через полторы минуты после повторного обрыва ход делается');
 
+// Возврат после обрыва, о котором сервер ещё не узнал. Телефон переключил сеть — сокет висит
+// живым, место числится занятым. Игрок возвращается с тем же токеном и должен получить своё
+// место, а не стать зрителем: иначе на его ходу он видит «ход соперника» и не может сходить.
+const ghost = connect('Призрак', 'token-g');
+manager.handle(ghost, { t: 'create', mode: 'bot', difficulty: 'easy', side: 'radiant', order: 'radiant', timers: false });
+const gRoom = ghost.room;
+const gTeam = ghost.team;
+clearTimeout(gRoom.botTimer);
+check(gRoom.phase === 'draft', 'драфт идёт — место занято, лобби уже позади');
+const again = connect('Призрак', 'token-g');
+manager.handle(again, { t: 'join', code: gRoom.code });
+check(again.team === gTeam, 'вернувшийся получает своё место, даже если прежнее соединение ещё висит');
+check(gRoom.seats[gTeam].client === again, 'место закреплено за новым соединением');
+check(ghost.team === null && !gRoom.clients.has(ghost), 'прежнее соединение отвязано');
+manager.leave(ghost);
+check(gRoom.seats[gTeam]?.client === again, 'запоздавший обрыв прежнего соединения место не отбирает');
+
 // Сверка состояния по сердцебиению. Ради неё всё и затевалось: если сообщение об изменении не
 // доехало, у игрока на экране висит чужой ход и кнопка не нажимается — сам он это не починит.
 const spec = connect('Зритель', 'token-s');

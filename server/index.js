@@ -65,13 +65,27 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 wss.on('connection', ws => {
   const client = manager.createClient();
   client.ws = ws;
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   ws.on('message', raw => {
+    ws.isAlive = true;
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
     try { manager.handle(client, msg); } catch (e) { console.error(e); manager.send(client, { t: 'error', error: 'Ошибка сервера' }); }
   });
   ws.on('close', () => manager.leave(client));
 });
+
+// Оборвавшееся соединение молчит, а не закрывается: телефон переключил сеть, вкладка уснула —
+// и сокет висит живым, пока не истечёт таймаут сети. Всё это время комната считает игрока на
+// связи. Проверяем сами: не ответил на два опроса подряд — соединение закрыто, место свободно.
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    try { ws.ping(); } catch {}
+  }
+}, 20_000).unref?.();
 
 server.listen(PORT, () => {
   console.log(`Dota Draft Battle: http://localhost:${PORT}  (patch ${heroesData.patch}, ${statsData.meta.pubMatches} pub + ${statsData.meta.proMatches} pro matches)`);
